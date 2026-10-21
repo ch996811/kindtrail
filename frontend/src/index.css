@@ -1,0 +1,47 @@
+@import "tailwindcss";
+
+/* Kindtrail "Blush" design tokens. Change a color here and it changes everywhere. */
+@theme {
+  --color-blush: #FFF0F4;     /* page background */
+  --color-band: #F0A3BC;      /* hero band: soft, low-chroma pink */
+  --color-petal: #FFD3E1;     /* soft surfaces */
+  --color-pink: #F23D7C;      /* primary action */
+  --color-pink-hover: #FF5A90;
+  --color-pink-deep: #C81D5E;
+  --color-wine: #3A0B25;      /* text */
+  --color-wine-2: #7D4A63;    /* secondary text */
+  --color-mint: #12855F;      /* fits the fund */
+  --color-mint-bg: #DDF3EA;
+  --color-plum: #5B1640;      /* blocked: dark so it never reads as brand pink */
+  --color-plum-bg: #F7E9F0;
+  --color-sun: #FFE8A3;
+  --color-coin: #FFD84D;
+
+  --font-sans: "Bricolage Grotesque", system-ui, sans-serif;
+  --font-tc: "Noto Sans TC", sans-serif;
+  --font-receipt: ui-monospace, "Cascadia Mono", Consolas, monospace;
+}
+
+/* Bricolage is a variable font: display text runs narrower and tighter than body text. */
+@utility font-display {
+  font-variation-settings: "opsz" 96, "wdth" 92;
+  letter-spacing: -0.02em;
+}
+@utility font-heading {
+  font-variation-settings: "opsz" 48, "wdth" 90;
+  letter-spacing: -0.02em;
+}
+
+@layer base {
+  body {
+    @apply bg-blush text-wine font-sans antialiased;
+    font-variation-settings: "opsz" 14;
+  }
+  button {
+    cursor: pointer;
+  }
+  :focus-visible {
+    outline: 3px solid var(--color-wine);
+    outline-offset: 3px;
+  }
+}
