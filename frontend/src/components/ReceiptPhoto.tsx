@@ -1,4 +1,4 @@
-import { lineTotal, type ReviewRequest } from '../data/demo'
+import { lineTotal, type ReviewRequest } from '../model'
 
 /** The partner's receipt photo, with every line the AI read marked by its verdict. */
 export function ReceiptPhoto({ request }: { request: ReviewRequest }) {

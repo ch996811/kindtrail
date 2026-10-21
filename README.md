@@ -28,12 +28,43 @@ Kindtrail closes that loop:
 - AI: Gemini (receipt vision, rule extraction, explanations) behind a provider switch, with cached
   replays so the hosted demo keeps working when free quotas run out
 
-## Try the sandbox probe
+## Run it locally
+
+Needs Python 3.10+ and Node 20.19+.
 
 ```bash
-cp .env.example .env   # fill in sandbox client id / secret and test account emails
-python backend/scripts/sandbox_smoke.py
+cp .env.example .env                      # sandbox client id / secret and test account emails
+python -m venv .venv
+.venv/Scripts/pip install -r backend/requirements-dev.txt   # macOS/Linux: .venv/bin/pip
+.venv/Scripts/python -m pytest backend/tests
+.venv/Scripts/python -m uvicorn app.main:app --app-dir backend --port 8000
 ```
+
+In a second terminal:
+
+```bash
+cd frontend
+npm install
+npm run dev        # http://localhost:5173, proxies /api to :8000
+```
+
+`npm run build` writes `frontend/dist`, which the API serves at http://localhost:8000.
+
+To check that a sandbox app has everything Kindtrail needs (orders, payouts, balances,
+transaction search), run `python backend/scripts/sandbox_smoke.py`.
+
+## API
+
+| Method | Path | What it does |
+|---|---|---|
+| POST | `/api/gifts` | Create a PayPal order for a gift, tagged with the fund in `custom_id` |
+| POST | `/api/gifts/{order_id}/capture` | Capture an approved order and add the gift to the fund |
+| GET | `/api/funds/{code}` | Fund balance and every gift's spent / left amounts |
+| GET | `/api/requests/{id}` | A spending request with its line verdicts and which gifts would pay for it |
+| POST | `/api/requests/{id}/approve` | Allocate gifts oldest-first, then pay the partner through PayPal Payouts |
+| POST | `/api/requests/{id}/refresh` | Pull the payout status from PayPal |
+| GET | `/api/reconcile` | Match the ledger against PayPal Transaction Search |
+| POST | `/api/webhooks/paypal` | Verified PayPal webhooks (captures, payout items) |
 
 ## License
 

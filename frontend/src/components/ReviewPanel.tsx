@@ -1,5 +1,5 @@
 import { motion } from 'motion/react'
-import { lineTotal, usd, type ReviewRequest } from '../data/demo'
+import { lineTotal, usd, type ReviewRequest } from '../model'
 
 function Check() {
   return (

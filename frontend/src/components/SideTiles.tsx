@@ -1,5 +1,5 @@
 import type { ReactNode } from 'react'
-import { usd, type Gift, type ReviewRequest } from '../data/demo'
+import { usd, type Gift, type ReviewRequest } from '../model'
 
 const TONE: Record<Gift['tone'], string> = {
   pink: 'bg-petal text-pink-deep',
@@ -38,9 +38,10 @@ export function SideTiles({ request }: { request: ReviewRequest }) {
       </Tile>
 
       <Tile title="Whose dollars">
+        {request.gifts.length === 0 && <p className="mt-3 mb-0 text-[15px] text-wine-2">No gifts have reached this fund yet.</p>}
         <ul className="m-0 mt-3.5 grid list-none gap-2.5 p-0">
           {request.gifts.map((g) => {
-            const left = g.given - g.usedHere
+            const left = g.left ?? g.given - g.usedHere
             return (
               <li key={g.donor} className="flex items-center gap-3">
                 <span className={`grid size-[38px] flex-none place-items-center rounded-full font-bold ${TONE[g.tone]}`} aria-hidden="true">

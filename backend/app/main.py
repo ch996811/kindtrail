@@ -1,0 +1,139 @@
+"""Kindtrail API. Run: .venv/Scripts/python -m uvicorn app.main:app --app-dir backend --reload"""
+import sqlite3
+from collections.abc import Iterator
+from contextlib import asynccontextmanager
+from datetime import datetime, timedelta, timezone
+from pathlib import Path
+from typing import Any
+
+from fastapi import Body, Depends, FastAPI, Request
+from fastapi.responses import JSONResponse
+from fastapi.staticfiles import StaticFiles
+from pydantic import BaseModel, Field
+
+from . import ledger, service
+from .config import Settings, load_settings
+from .db import connect
+from .paypal import PayPalClient, PayPalError
+from .seed import seed
+
+
+class GiftIn(BaseModel):
+    fund_code: str
+    donor_name: str = Field(min_length=1, max_length=80)
+    amount_cents: int = Field(gt=0, le=1_000_000)
+
+
+class ApproveIn(BaseModel):
+    approver: str = Field(default="Lin", min_length=1, max_length=80)
+
+
+def create_app(settings: Settings | None = None, paypal: Any = None, conn: sqlite3.Connection | None = None) -> FastAPI:
+    settings = settings or load_settings()
+
+    @asynccontextmanager
+    async def lifespan(app: FastAPI):
+        setup = conn or connect(settings.db_path)  # creates the schema
+        seed(setup, settings.partner_email)
+        if conn is None:
+            setup.close()
+        app.state.paypal = paypal or PayPalClient(settings.paypal_base_url, settings.paypal_client_id,
+                                                  settings.paypal_client_secret)
+        yield
+
+    app = FastAPI(title="Kindtrail", lifespan=lifespan)
+
+    @app.exception_handler(service.NotFound)
+    async def _not_found(_: Request, exc: service.NotFound):
+        return JSONResponse({"error": "not_found", "message": str(exc)}, status_code=404)
+
+    @app.exception_handler(service.Conflict)
+    async def _conflict(_: Request, exc: service.Conflict):
+        return JSONResponse({"error": "conflict", "message": str(exc)}, status_code=409)
+
+    @app.exception_handler(ledger.InsufficientFunds)
+    async def _insufficient(_: Request, exc: ledger.InsufficientFunds):
+        return JSONResponse({"error": "insufficient_funds", "message": str(exc),
+                             "available_cents": exc.available_cents, "needed_cents": exc.needed_cents}, status_code=409)
+
+    @app.exception_handler(PayPalError)
+    async def _paypal(_: Request, exc: PayPalError):
+        return JSONResponse({"error": "paypal", "message": str(exc), "paypal_status": exc.status}, status_code=502)
+
+    def db() -> Iterator[sqlite3.Connection]:
+        """One connection per request, so concurrent requests never share a transaction."""
+        if conn is not None:  # tests inject a shared in-memory database
+            yield conn
+            return
+        c = connect(settings.db_path, init=False)
+        try:
+            yield c
+        finally:
+            c.close()
+
+    def pp(request: Request):
+        return request.app.state.paypal
+
+    @app.get("/api/health")
+    def health() -> dict[str, Any]:
+        return {"ok": True, "paypal_env": settings.paypal_env}
+
+    @app.get("/api/funds/{code}")
+    def get_fund(code: str, conn: sqlite3.Connection = Depends(db)):
+        return service.fund_summary(conn, code)
+
+    @app.post("/api/gifts", status_code=201)
+    def create_gift(body: GiftIn, request: Request, conn: sqlite3.Connection = Depends(db)):
+        return service.create_gift(conn, pp(request), fund_code=body.fund_code,
+                                   donor_name=body.donor_name, amount_cents=body.amount_cents)
+
+    @app.post("/api/gifts/{order_id}/capture")
+    def capture_gift(order_id: str, request: Request, conn: sqlite3.Connection = Depends(db)):
+        return service.capture_gift(conn, pp(request), order_id)
+
+    @app.get("/api/requests/{request_id}")
+    def get_request(request_id: str, conn: sqlite3.Connection = Depends(db)):
+        return service.request_detail(conn, request_id)
+
+    @app.post("/api/requests/{request_id}/approve")
+    def approve(request_id: str, request: Request, body: ApproveIn | None = None,
+                conn: sqlite3.Connection = Depends(db)):
+        return service.approve_request(conn, pp(request), request_id, (body or ApproveIn()).approver)
+
+    @app.post("/api/requests/{request_id}/refresh")
+    def refresh(request_id: str, request: Request, conn: sqlite3.Connection = Depends(db)):
+        return service.refresh_payout(conn, pp(request), request_id)
+
+    @app.get("/api/reconcile")
+    def reconcile(request: Request, days: int = 7, conn: sqlite3.Connection = Depends(db)):
+        end = datetime.now(timezone.utc) - timedelta(seconds=5)
+        start = end - timedelta(days=max(1, min(days, 31)))
+        gifts = [{"gift_id": g["id"], "capture_id": g["paypal_capture_id"], "amount_cents": g["amount_cents"],
+                  "fund_code": g["fund_code"], "source": g["source"]}
+                 for g in conn.execute("SELECT * FROM gifts WHERE status = 'captured'")]
+        payouts = [{"request_id": p["request_id"], "transaction_id": p["transaction_id"], "amount_cents": p["amount_cents"]}
+                   for p in conn.execute("SELECT * FROM payouts")]
+        result = ledger.reconcile(gifts, payouts, pp(request).search_transactions(start, end))
+        result["window"] = {"start": start.isoformat(), "end": end.isoformat()}
+        result["note"] = "PayPal can take up to 3 hours to list a new transaction in Transaction Search."
+        return result
+
+    @app.post("/api/webhooks/paypal")
+    def paypal_webhook(request: Request, event: dict[str, Any] = Body(...), conn: sqlite3.Connection = Depends(db)):
+        verified = False
+        if settings.paypal_webhook_id:
+            try:
+                verified = pp(request).verify_webhook(webhook_id=settings.paypal_webhook_id,
+                                                      headers=dict(request.headers), event=event)
+            except PayPalError:
+                verified = False
+        return {"result": service.handle_webhook(conn, event, verified)}
+
+    dist = Path(settings.frontend_dist)
+    if dist.is_dir():
+        app.mount("/", StaticFiles(directory=dist, html=True), name="frontend")
+
+    return app
+
+
+app = create_app()

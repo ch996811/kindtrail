@@ -1,11 +1,15 @@
+import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
 import { MotionConfig } from 'motion/react'
-import { demoRequest } from './data/demo'
 import { ReviewDesk } from './pages/ReviewDesk'
+
+const queryClient = new QueryClient({ defaultOptions: { queries: { retry: 1, refetchOnWindowFocus: false } } })
 
 export default function App() {
   return (
-    <MotionConfig reducedMotion="user">
-      <ReviewDesk request={demoRequest} />
-    </MotionConfig>
+    <QueryClientProvider client={queryClient}>
+      <MotionConfig reducedMotion="user">
+        <ReviewDesk requestId="KT-0142" />
+      </MotionConfig>
+    </QueryClientProvider>
   )
 }
