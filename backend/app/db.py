@@ -77,6 +77,28 @@ CREATE TABLE IF NOT EXISTS payouts (
     updated_at       TEXT NOT NULL
 );
 
+-- Receipt photos, keyed by content hash (the hash also catches resubmitted receipts).
+CREATE TABLE IF NOT EXISTS receipts (
+    sha256      TEXT PRIMARY KEY,
+    mime        TEXT NOT NULL,
+    bytes       BLOB NOT NULL,
+    created_at  TEXT NOT NULL
+);
+
+-- Every model answer, so repeats and the hosted demo never spend quota.
+CREATE TABLE IF NOT EXISTS llm_cache (
+    key         TEXT PRIMARY KEY,
+    task        TEXT NOT NULL,
+    model       TEXT NOT NULL,
+    response    TEXT NOT NULL,
+    created_at  TEXT NOT NULL
+);
+
+CREATE TABLE IF NOT EXISTS llm_usage (
+    day    TEXT PRIMARY KEY,
+    calls  INTEGER NOT NULL
+);
+
 CREATE TABLE IF NOT EXISTS webhook_events (
     id           TEXT PRIMARY KEY,          -- PayPal event id, so redeliveries are ignored
     event_type   TEXT NOT NULL,
@@ -88,6 +110,16 @@ CREATE TABLE IF NOT EXISTS webhook_events (
 """
 
 
+# Columns added after the first release; connect() adds them to older databases.
+ADDED_COLUMNS = [
+    ("funds", "policy_json", "TEXT"),                 # structured limits parsed from donor_words
+    ("requests", "receipt_sha", "TEXT REFERENCES receipts(sha256)"),
+    ("requests", "review_json", "TEXT"),              # flags, model, cache hit
+    ("request_items", "category", "TEXT"),
+    ("request_items", "box_json", "TEXT"),            # [ymin, xmin, ymax, xmax] on the photo, 0-1000
+]
+
+
 def connect(path: str, init: bool = True) -> sqlite3.Connection:
     # Autocommit mode; multi-statement writes go through transaction() below.
     conn = sqlite3.connect(path, check_same_thread=False, isolation_level=None, timeout=10)
@@ -97,6 +129,9 @@ def connect(path: str, init: bool = True) -> sqlite3.Connection:
         if path != ":memory:":
             conn.execute("PRAGMA journal_mode = WAL")
         conn.executescript(SCHEMA)
+        for table, column, decl in ADDED_COLUMNS:
+            if column not in {r["name"] for r in conn.execute(f"PRAGMA table_info({table})")}:
+                conn.execute(f"ALTER TABLE {table} ADD COLUMN {column} {decl}")
     return conn
 
 

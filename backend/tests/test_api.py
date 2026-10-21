@@ -1,3 +1,5 @@
+from pathlib import Path
+
 from conftest import PARTNER_EMAIL
 
 FUND = "FUND-HUALIEN-KIDS"
@@ -115,3 +117,58 @@ def test_webhook_redelivery_is_ignored_and_unverified_events_change_nothing(clie
     assert client.post("/api/webhooks/paypal", json=event2).json()["result"] == "gift-captured"
     assert client.post("/api/webhooks/paypal", json=event2).json()["result"] == "duplicate"
     assert conn.execute("SELECT status FROM gifts WHERE paypal_order_id = ?", (order_id,)).fetchone()[0] == "captured"
+
+
+# AI review through the API ------------------------------------------------------------------
+
+DEMO = Path(__file__).resolve().parents[1] / "demo" / "receipts"
+
+
+def upload(client, photo, mime="image/jpeg", purpose="relief supplies"):
+    return client.post("/api/requests", data={"fund_code": FUND, "partner_id": "hualien-mountain-kitchen",
+                                              "purpose": purpose},
+                       files={"receipt": (photo.name, photo.read_bytes(), mime)})
+
+
+def test_seeded_request_comes_from_the_ai_review_of_the_demo_receipt(client):
+    d = client.get("/api/requests/KT-0142").json()
+    assert [(i["category"], i["verdict"]) for i in d["items"]] == [
+        ("shelter", "fits"), ("food", "fits"), ("children_supplies", "fits"), ("cash_equivalent", "blocked")]
+    assert all(len(i["box"]) == 4 for i in d["items"])
+    assert d["ai"]["cached"] is True and d["flags"] == []
+    assert [r["kind"] for r in d["fund"]["rules"]] == ["Where", "For", "Who", "Never", "Until"]
+    photo = client.get(d["receipt_url"])
+    assert photo.status_code == 200 and photo.headers["content-type"] == "image/jpeg"
+
+
+def test_uploaded_receipt_from_the_wrong_city_is_blocked_with_reasons(client):
+    r = upload(client, DEMO / "taipei-corner-store.jpg")
+    assert r.status_code == 201, r.text
+    d = r.json()
+    assert d["id"] == "KT-0143" and d["status"] == "reviewed"
+    assert d["payable_cents"] == 0 and d["requested_cents"] == 6110
+    assert [f["kind"] for f in d["flags"]] == ["region"]
+    reasons = {i["category"]: i["reason"] for i in d["items"]}
+    assert reasons["alcohol_tobacco"].startswith("Alcohol")
+    assert reasons["water"].startswith("Bought in Taipei City")
+    assert client.post(f"/api/requests/{d['id']}/approve").status_code == 409  # nothing to pay
+
+
+def test_the_same_receipt_twice_is_caught(client):
+    r = upload(client, DEMO / "hualien-home-mart.jpg")
+    d = r.json()
+    assert [f["kind"] for f in d["flags"]] == ["duplicate"]
+    assert "KT-0142" in d["flags"][0]["message"] and d["payable_cents"] == 0
+
+
+def test_receipts_without_an_ai_answer_get_a_clear_503(client, tmp_path):
+    photo = tmp_path / "new.jpg"
+    photo.write_bytes(b"\xff\xd8 not in the cache")
+    r = upload(client, photo)
+    assert r.status_code == 503 and r.json()["error"] == "ai_unavailable"
+
+
+def test_only_photos_are_accepted(client, tmp_path):
+    doc = tmp_path / "receipt.pdf"
+    doc.write_bytes(b"%PDF")
+    assert upload(client, doc, mime="application/pdf").status_code == 409

@@ -12,6 +12,7 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 from app.config import load_settings  # noqa: E402
 from app.db import connect  # noqa: E402
+from app.llm import make_llm  # noqa: E402
 from app.seed import reset_request, seed  # noqa: E402
 
 
@@ -23,7 +24,7 @@ def main() -> None:
 
     s = load_settings()
     conn = connect(s.db_path)
-    seed(conn, s.partner_email, demo_gifts=args.demo_gifts)
+    seed(conn, s.partner_email, make_llm(s.llm_provider, s.gemini_api_key, s.llm_daily_cap), demo_gifts=args.demo_gifts)
     if args.reset:
         reset_request(conn)
     gifts = conn.execute("SELECT id, donor_name, amount_cents, status, source FROM gifts ORDER BY id").fetchall()

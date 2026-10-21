@@ -8,7 +8,7 @@ export default function App() {
   return (
     <QueryClientProvider client={queryClient}>
       <MotionConfig reducedMotion="user">
-        <ReviewDesk requestId="KT-0142" />
+        <ReviewDesk requestId={new URLSearchParams(window.location.search).get('request') ?? 'KT-0142'} />
       </MotionConfig>
     </QueryClientProvider>
   )

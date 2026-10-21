@@ -6,14 +6,15 @@ from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from typing import Any
 
-from fastapi import Body, Depends, FastAPI, Request
-from fastapi.responses import JSONResponse
+from fastapi import Body, Depends, FastAPI, File, Form, Request, UploadFile
+from fastapi.responses import JSONResponse, Response
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel, Field
 
 from . import ledger, service
 from .config import Settings, load_settings
 from .db import connect
+from .llm import AIUnavailable, LLM, make_llm
 from .paypal import PayPalClient, PayPalError
 from .seed import seed
 
@@ -28,13 +29,23 @@ class ApproveIn(BaseModel):
     approver: str = Field(default="Lin", min_length=1, max_length=80)
 
 
-def create_app(settings: Settings | None = None, paypal: Any = None, conn: sqlite3.Connection | None = None) -> FastAPI:
+class LimitsIn(BaseModel):
+    donor_words: str = Field(min_length=3, max_length=2000)
+
+
+RECEIPT_TYPES = {"image/jpeg", "image/png", "image/webp"}
+MAX_RECEIPT_BYTES = 6 * 1024 * 1024
+
+
+def create_app(settings: Settings | None = None, paypal: Any = None, conn: sqlite3.Connection | None = None,
+               llm: LLM | None = None) -> FastAPI:
     settings = settings or load_settings()
+    llm = llm or make_llm(settings.llm_provider, settings.gemini_api_key, settings.llm_daily_cap)
 
     @asynccontextmanager
     async def lifespan(app: FastAPI):
         setup = conn or connect(settings.db_path)  # creates the schema
-        seed(setup, settings.partner_email)
+        seed(setup, settings.partner_email, llm)
         if conn is None:
             setup.close()
         app.state.paypal = paypal or PayPalClient(settings.paypal_base_url, settings.paypal_client_id,
@@ -55,6 +66,10 @@ def create_app(settings: Settings | None = None, paypal: Any = None, conn: sqlit
     async def _insufficient(_: Request, exc: ledger.InsufficientFunds):
         return JSONResponse({"error": "insufficient_funds", "message": str(exc),
                              "available_cents": exc.available_cents, "needed_cents": exc.needed_cents}, status_code=409)
+
+    @app.exception_handler(AIUnavailable)
+    async def _ai(_: Request, exc: AIUnavailable):
+        return JSONResponse({"error": "ai_unavailable", "message": str(exc)}, status_code=503)
 
     @app.exception_handler(PayPalError)
     async def _paypal(_: Request, exc: PayPalError):
@@ -90,6 +105,27 @@ def create_app(settings: Settings | None = None, paypal: Any = None, conn: sqlit
     @app.post("/api/gifts/{order_id}/capture")
     def capture_gift(order_id: str, request: Request, conn: sqlite3.Connection = Depends(db)):
         return service.capture_gift(conn, pp(request), order_id)
+
+    @app.post("/api/limits/parse")
+    def parse_limits(body: LimitsIn, conn: sqlite3.Connection = Depends(db)):
+        return service.parse_limits(conn, llm, body.donor_words)
+
+    @app.post("/api/requests", status_code=201)
+    def create_request(fund_code: str = Form(...), partner_id: str = Form(...),
+                       purpose: str = Form(..., min_length=1, max_length=120), receipt: UploadFile = File(...),
+                       conn: sqlite3.Connection = Depends(db)):
+        if receipt.content_type not in RECEIPT_TYPES:
+            raise service.Conflict(f"receipt must be a JPEG, PNG or WebP photo, got {receipt.content_type}")
+        image = receipt.file.read(MAX_RECEIPT_BYTES + 1)
+        if len(image) > MAX_RECEIPT_BYTES:
+            raise service.Conflict("receipt photo is larger than 6 MB")
+        return service.create_request(conn, llm, fund_code=fund_code, partner_id=partner_id, purpose=purpose,
+                                      image=image, mime=receipt.content_type)
+
+    @app.get("/api/requests/{request_id}/receipt")
+    def get_receipt(request_id: str, conn: sqlite3.Connection = Depends(db)):
+        data, mime = service.receipt_image(conn, request_id)
+        return Response(data, media_type=mime, headers={"Cache-Control": "public, max-age=86400"})
 
     @app.get("/api/requests/{request_id}")
     def get_request(request_id: str, conn: sqlite3.Connection = Depends(db)):

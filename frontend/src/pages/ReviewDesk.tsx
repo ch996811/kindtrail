@@ -1,4 +1,5 @@
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
+import { useState } from 'react'
 import { ActionBar, type Stage } from '../components/ActionBar'
 import { ReceiptPhoto } from '../components/ReceiptPhoto'
 import { ReviewPanel } from '../components/ReviewPanel'
@@ -12,6 +13,7 @@ const APPROVER = 'Lin'
 
 export function ReviewDesk({ requestId }: { requestId: string }) {
   const qc = useQueryClient()
+  const [activeItem, setActiveItem] = useState<string | null>(null)
   const key = ['request', requestId]
   const { data, error, isPending } = useQuery({ queryKey: key, queryFn: () => getRequest(requestId) })
 
@@ -47,12 +49,17 @@ export function ReviewDesk({ requestId }: { requestId: string }) {
   const stage: Stage = data.status === 'paid' ? 'paid' : data.status === 'paying' || approve.isPending ? 'paying' : 'review'
   const notice = approve.error
     ? approve.error.message
-    : data.shortfall_cents > 0
+    : data.payable_cents === 0 && stage === 'review'
+      ? 'Nothing on this receipt fits the fund. Send it back to the partner.'
+      : data.shortfall_cents > 0
       ? `The fund is ${usd(data.shortfall_cents / 100)} short. Wait for more gifts before paying.`
       : undefined
 
   const stops = [
-    { label: 'Gifts in', detail: `${data.funding.length} ${data.funding.length === 1 ? 'donor' : 'donors'}` },
+    {
+      label: 'Gifts in',
+      detail: data.payable_cents === 0 ? 'nothing to pay' : `${data.funding.length} ${data.funding.length === 1 ? 'donor' : 'donors'}`,
+    },
     { label: 'Asked', detail: request.submitted },
     { label: stage === 'review' ? 'Your review' : 'Approved', detail: `by ${data.approved_by ?? APPROVER}` },
     { label: 'Paid', detail: 'via PayPal' },
@@ -79,9 +86,9 @@ export function ReviewDesk({ requestId }: { requestId: string }) {
       </header>
 
       <main className="mx-auto grid max-w-[1160px] items-start gap-[26px] px-6 pt-[30px] pb-[130px] lg:grid-cols-[5fr_7fr]">
-        <ReceiptPhoto request={request} />
+        <ReceiptPhoto request={request} activeItem={activeItem} onActivate={setActiveItem} />
         <div>
-          <ReviewPanel request={request} />
+          <ReviewPanel request={request} activeItem={activeItem} onActivate={setActiveItem} />
           <SideTiles request={request} />
         </div>
       </main>
@@ -91,7 +98,7 @@ export function ReviewDesk({ requestId }: { requestId: string }) {
         amount={data.payable_cents / 100}
         stage={stage}
         notice={notice}
-        canApprove={data.shortfall_cents === 0}
+        canApprove={data.shortfall_cents === 0 && data.payable_cents > 0}
         onApprove={() => approve.mutate()}
       />
     </>

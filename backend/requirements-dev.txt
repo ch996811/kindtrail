@@ -1,2 +1,3 @@
 -r requirements.txt
 pytest>=8
+pillow>=13  # backend/demo/make_receipts.py only

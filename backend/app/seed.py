@@ -1,62 +1,83 @@
 """Demo data: one fund, one field partner, one reviewed request (KT-0142).
 
-The AI review results on the request are fixed here until the review agent lands (week 2).
+The fund's limits and KT-0142's review come from the real AI pipeline. backend/demo/llm_cache.json
+holds those model answers, so this works with no API key (and costs no quota). If an answer is
+missing, the fixed fallback below keeps the demo usable.
+
 Gifts normally come from real sandbox checkouts; `demo_gifts=True` adds three made-up ones
 (source='seed') so the UI has something to show. Reconciliation flags those as ours-only.
 """
 import json
 import sqlite3
+from pathlib import Path
 
-from .db import transaction
+from . import service
+from .db import now_iso, transaction
+from .llm import LLM, AIUnavailable
 
-FUND = {
-    "code": "FUND-HUALIEN-KIDS",
-    "name": "Hualien Kids Typhoon Fund",
-    "donor_words": "Please use my gift only for kids in Hualien who lost their homes in the typhoon. Not for staff costs.",
-    "rules": [
-        {"kind": "Where", "value": "Hualien County"},
-        {"kind": "For", "value": "shelter, food, kids' supplies"},
-        {"kind": "Who", "value": "families with children"},
-        {"kind": "Never", "value": "staff, cash equivalents"},
-        {"kind": "Until", "value": "Dec 31"},
-    ],
-}
+DEMO_DIR = Path(__file__).resolve().parents[1] / "demo"
 
-ITEMS = [
-    ("tarp", "Waterproof tarp 3x4m", "4 waterproof tarps", 4, 800, "fits", "Shelter, an allowed use"),
-    ("rice", "Rice 10 kg", "2 bags of rice, 10 kg", 2, 1200, "fits", "Food, an allowed use"),
-    ("coat", "Kids raincoat", "6 kids' raincoats", 6, 360, "fits", "For children, exactly who the fund serves"),
-    ("card", "Prepaid gift card", "1 prepaid gift card", 1, 880, "blocked",
-     "Cash equivalents break the donors' limits. The partner can pay this from general funds."),
-]
+FUND_CODE = "FUND-HUALIEN-KIDS"
+FUND_NAME = "Hualien Kids Typhoon Fund"
+FUND_CREATED = "2026-10-20"  # anchors "by the end of the year" in the donor's words
+DONOR_WORDS = ("Please use my gift only for kids in Hualien who lost their homes in the typhoon. "
+               "Not for staff costs. Spend it by the end of the year.")
+FALLBACK_POLICY = {"region": "Hualien County", "allowed": ["shelter", "food", "water", "children_supplies"],
+                   "never": ["staff_cost"], "beneficiaries": "kids who lost their homes", "until": "2026-12-31"}
+
+PARTNER_ID = "hualien-mountain-kitchen"
+DEMO_REQUEST = {"id": "KT-0142", "receipt": "hualien-home-mart.jpg", "purpose": "typhoon families",
+                "submitted_at": "2026-10-24T06:40:00Z"}
 
 DEMO_GIFTS = [("Mei L.", 5000, "2026-10-21T09:12:00Z"), ("Jordan P.", 2000, "2026-10-22T14:40:00Z"),
               ("Anonymous", 2500, "2026-10-23T08:05:00Z")]
 
 
-def seed(conn: sqlite3.Connection, partner_email: str, demo_gifts: bool = False) -> None:
-    with transaction(conn):
-        conn.execute("INSERT OR IGNORE INTO funds (code, name, donor_words, rules_json) VALUES (?, ?, ?, ?)",
-                     (FUND["code"], FUND["name"], FUND["donor_words"], json.dumps(FUND["rules"])))
-        conn.execute("INSERT OR IGNORE INTO partners (id, name, paypal_email, region, month_cap_cents) VALUES (?, ?, ?, ?, ?)",
-                     ("hualien-mountain-kitchen", "Hualien Mountain Kitchen", partner_email or "partner@example.com",
-                      "Hualien County", 200000))
-        new = conn.execute(
-            "INSERT OR IGNORE INTO requests (id, fund_code, partner_id, purpose, shop_json, status, submitted_at) "
-            "VALUES (?, ?, ?, ?, ?, 'reviewed', ?)",
-            ("KT-0142", FUND["code"], "hualien-mountain-kitchen", "typhoon families",
-             json.dumps({"name": "HUALIEN HOME MART", "branch": "Ji'an branch", "printed_at": "2026-10-24 14:32",
-                         "region": "Hualien County"}), "2026-10-24T06:40:00Z"),
-        ).rowcount
-        if new:
-            conn.executemany(
-                "INSERT INTO request_items (request_id, item_key, receipt_text, label, qty, unit_cents, verdict, reason) "
-                "VALUES ('KT-0142', ?, ?, ?, ?, ?, ?, ?)", ITEMS)
-        if demo_gifts and not conn.execute("SELECT 1 FROM gifts WHERE source = 'seed'").fetchone():
-            conn.executemany(
-                "INSERT INTO gifts (fund_code, donor_name, amount_cents, status, source, created_at, captured_at) "
-                "VALUES (?, ?, ?, 'captured', 'seed', ?, ?)",
-                [(FUND["code"], name, cents, at, at) for name, cents, at in DEMO_GIFTS])
+def load_demo_cache(conn: sqlite3.Connection) -> int:
+    path = DEMO_DIR / "llm_cache.json"
+    if not path.exists():
+        return 0
+    rows = json.loads(path.read_text(encoding="utf-8"))
+    conn.executemany("INSERT OR IGNORE INTO llm_cache (key, task, model, response, created_at) VALUES (?, ?, ?, ?, ?)",
+                     [(r["key"], r["task"], r["model"], json.dumps(r["response"]), now_iso()) for r in rows])
+    return len(rows)
+
+
+def seed(conn: sqlite3.Connection, partner_email: str, llm: LLM | None = None, demo_gifts: bool = False) -> None:
+    if llm is not None:
+        load_demo_cache(conn)
+
+    fund = conn.execute("SELECT policy_json FROM funds WHERE code = ?", (FUND_CODE,)).fetchone()
+    if fund is None or not fund["policy_json"]:
+        policy = FALLBACK_POLICY
+        if llm is not None:
+            try:
+                policy = service.parse_limits(conn, llm, DONOR_WORDS, today=FUND_CREATED)["policy"]
+            except AIUnavailable:
+                pass
+        with transaction(conn):
+            conn.execute("INSERT OR IGNORE INTO funds (code, name, donor_words, rules_json) VALUES (?, ?, ?, '[]')",
+                         (FUND_CODE, FUND_NAME, DONOR_WORDS))
+            conn.execute("UPDATE funds SET policy_json = ?, donor_words = ? WHERE code = ?",
+                         (json.dumps(policy), DONOR_WORDS, FUND_CODE))
+
+    conn.execute("INSERT OR IGNORE INTO partners (id, name, paypal_email, region, month_cap_cents) VALUES (?, ?, ?, ?, ?)",
+                 (PARTNER_ID, "Hualien Mountain Kitchen", partner_email or "partner@example.com", "Hualien County", 200000))
+
+    if llm is not None and not conn.execute("SELECT 1 FROM requests WHERE id = ?", (DEMO_REQUEST["id"],)).fetchone():
+        try:
+            service.create_request(conn, llm, fund_code=FUND_CODE, partner_id=PARTNER_ID,
+                                   purpose=DEMO_REQUEST["purpose"], image=(DEMO_DIR / "receipts" / DEMO_REQUEST["receipt"]).read_bytes(),
+                                   mime="image/jpeg", request_id=DEMO_REQUEST["id"],
+                                   submitted_at=DEMO_REQUEST["submitted_at"])
+        except AIUnavailable:
+            pass  # no cached answer and no key: the demo starts without KT-0142
+
+    if demo_gifts and not conn.execute("SELECT 1 FROM gifts WHERE source = 'seed'").fetchone():
+        conn.executemany(
+            "INSERT INTO gifts (fund_code, donor_name, amount_cents, status, source, created_at, captured_at) "
+            "VALUES (?, ?, ?, 'captured', 'seed', ?, ?)",
+            [(FUND_CODE, name, cents, at, at) for name, cents, at in DEMO_GIFTS])
 
 
 def reset_request(conn: sqlite3.Connection, request_id: str = "KT-0142") -> None:

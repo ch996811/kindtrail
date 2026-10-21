@@ -1,0 +1,171 @@
+[
+ {
+  "key": "5fd2b5e422dc096c3335fb70d56a348f215023dfd238279120e80c02fb4e1b19",
+  "task": "limits",
+  "model": "gemini-3.5-flash-lite",
+  "response": {
+   "region": "Hualien County",
+   "allowed": [
+    "shelter",
+    "food",
+    "water",
+    "children_supplies"
+   ],
+   "never": [
+    "staff_cost"
+   ],
+   "beneficiaries": "kids who lost their homes in the typhoon",
+   "until": "2026-12-31"
+  }
+ },
+ {
+  "key": "29b8d52f4ea8898cfbd79ac6e148d46c4bb070a96b466ede88820d4bf680cc22",
+  "task": "receipt",
+  "model": "gemini-3.5-flash-lite",
+  "response": {
+   "readable": true,
+   "shop": {
+    "name": "CORNER 24 MARKET",
+    "branch": "Daan Store",
+    "address": "No. 12 Xinyi Rd Sec 3",
+    "region": "Taipei City",
+    "printed_at": "2026-10-25 21:07"
+   },
+   "currency": "USD",
+   "total": 61.1,
+   "items": [
+    {
+     "receipt_text": "Bottled water 6pk",
+     "label": "3 Bottled water 6pk",
+     "qty": 3,
+     "unit_price": 4.5,
+     "line_total": 13.5,
+     "category": "water",
+     "box_2d": [
+      410,
+      201,
+      461,
+      696
+     ]
+    },
+    {
+     "receipt_text": "Instant noodles 5pk",
+     "label": "4 Instant noodles 5pk",
+     "qty": 4,
+     "unit_price": 3.2,
+     "line_total": 12.8,
+     "category": "food",
+     "box_2d": [
+      476,
+      203,
+      528,
+      699
+     ]
+    },
+    {
+     "receipt_text": "Beer 6-pack",
+     "label": "2 Beer 6-pack",
+     "qty": 2,
+     "unit_price": 9.9,
+     "line_total": 19.8,
+     "category": "alcohol_tobacco",
+     "box_2d": [
+      542,
+      204,
+      595,
+      699
+     ]
+    },
+    {
+     "receipt_text": "Phone top-up card",
+     "label": "1 Phone top-up card",
+     "qty": 1,
+     "unit_price": 15.0,
+     "line_total": 15.0,
+     "category": "cash_equivalent",
+     "box_2d": [
+      611,
+      207,
+      663,
+      700
+     ]
+    }
+   ]
+  }
+ },
+ {
+  "key": "af5069082882b5e7418fe31c79a279cdc18b95ae185dbac54ac8a5f5ff730a6b",
+  "task": "receipt",
+  "model": "gemini-3.5-flash-lite",
+  "response": {
+   "readable": true,
+   "shop": {
+    "name": "HUALIEN HOME MART",
+    "branch": "Ji'an Branch",
+    "address": "No. 88 Zhongshan Rd, Ji'an",
+    "region": "Hualien County",
+    "printed_at": "2026-10-24 14:32"
+   },
+   "currency": "USD",
+   "total": 86.4,
+   "items": [
+    {
+     "receipt_text": "Waterproof tarp 3x4m",
+     "label": "4 Waterproof tarps 3x4m",
+     "qty": 4,
+     "unit_price": 8.0,
+     "line_total": 32.0,
+     "category": "shelter",
+     "box_2d": [
+      410,
+      196,
+      467,
+      696
+     ]
+    },
+    {
+     "receipt_text": "Rice 10 kg",
+     "label": "2 Rice 10 kg",
+     "qty": 2,
+     "unit_price": 12.0,
+     "line_total": 24.0,
+     "category": "food",
+     "box_2d": [
+      480,
+      203,
+      532,
+      699
+     ]
+    },
+    {
+     "receipt_text": "Kids raincoat",
+     "label": "6 Kids raincoats",
+     "qty": 6,
+     "unit_price": 3.6,
+     "line_total": 21.6,
+     "category": "children_supplies",
+     "box_2d": [
+      546,
+      206,
+      600,
+      701
+     ]
+    },
+    {
+     "receipt_text": "Prepaid gift card",
+     "label": "1 Prepaid gift card",
+     "qty": 1,
+     "unit_price": 8.8,
+     "line_total": 8.8,
+     "category": "cash_equivalent",
+     "box_2d": [
+      611,
+      208,
+      666,
+      704
+     ]
+    }
+   ]
+  }
+ }
+]

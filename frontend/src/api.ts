@@ -12,7 +12,10 @@ export interface RequestDetail {
   partner: { id: string; name: string; region: string }
   fund: { code: string; name: string; donor_words: string; rules: { kind: ReviewRequest['rules'][number]['kind']; value: string }[] }
   shop: { name: string; branch: string; printed_at: string; region: string }
-  items: { key: string; receipt_text: string; label: string; qty: number; unit_cents: number; total_cents: number; verdict: 'fits' | 'blocked'; reason: string }[]
+  receipt_url: string | null
+  items: { key: string; receipt_text: string; label: string; qty: number; unit_cents: number; total_cents: number; category: string | null; box: [number, number, number, number] | null; verdict: 'fits' | 'blocked'; reason: string }[]
+  flags: { kind: string; severity: 'block' | 'check'; message: string }[]
+  ai: { model: string; cached: boolean } | null
   requested_cents: number
   payable_cents: number
   funding: { gift_id: number; donor: string; date: string; given_cents: number; used_here_cents: number; left_cents: number }[]
@@ -56,6 +59,9 @@ export function toReviewModel(d: RequestDetail): ReviewRequest {
     purpose: d.purpose,
     submitted: shortDate(d.submitted_at),
     shop: { name: d.shop.name, branch: d.shop.branch, printedAt: d.shop.printed_at },
+    receiptUrl: d.receipt_url ?? undefined,
+    flags: d.flags,
+    aiModel: d.ai?.model,
     items: d.items.map((i) => ({
       id: i.key,
       receiptText: i.receipt_text,
@@ -64,6 +70,7 @@ export function toReviewModel(d: RequestDetail): ReviewRequest {
       unitPrice: i.unit_cents / 100,
       verdict: i.verdict,
       reason: i.reason,
+      box: i.box ?? undefined,
     })),
     donorWords: d.fund.donor_words,
     rules: d.fund.rules,

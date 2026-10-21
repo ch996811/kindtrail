@@ -10,6 +10,7 @@ export interface LineItem {
   unitPrice: number
   verdict: Verdict
   reason: string
+  box?: [number, number, number, number] // [ymin, xmin, ymax, xmax] on the photo, 0-1000
 }
 
 export interface Gift {
@@ -34,6 +35,9 @@ export interface ReviewRequest {
   purpose: string
   submitted: string
   shop: { name: string; branch: string; printedAt: string }
+  receiptUrl?: string
+  flags?: { kind: string; severity: 'block' | 'check'; message: string }[]
+  aiModel?: string
   items: LineItem[]
   donorWords: string
   rules: FundRule[]

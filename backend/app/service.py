@@ -1,11 +1,13 @@
 """Use cases that touch both the database and PayPal."""
+import hashlib
 import json
 import sqlite3
 import uuid
 from typing import Any, Protocol
 
-from . import ledger
+from . import ledger, review
 from .db import now_iso, to_cents, transaction
+from .llm import LLM
 from .paypal import PayPalError, approve_link
 
 
@@ -112,6 +114,8 @@ def request_detail(conn: sqlite3.Connection, request_id: str) -> dict[str, Any]:
         (partner["id"], now_iso(), request_id),
     ).fetchone()[0]
     payout = conn.execute("SELECT * FROM payouts WHERE request_id = ?", (request_id,)).fetchone()
+    review_info = json.loads(req["review_json"]) if req["review_json"] else {}
+    rules = review.policy_chips(json.loads(fund["policy_json"])) if fund["policy_json"] else json.loads(fund["rules_json"])
 
     return {
         "id": req["id"],
@@ -120,12 +124,15 @@ def request_detail(conn: sqlite3.Connection, request_id: str) -> dict[str, Any]:
         "submitted_at": req["submitted_at"],
         "approved_by": req["approved_by"],
         "partner": {"id": partner["id"], "name": partner["name"], "region": partner["region"]},
-        "fund": {"code": fund["code"], "name": fund["name"], "donor_words": fund["donor_words"],
-                 "rules": json.loads(fund["rules_json"])},
+        "fund": {"code": fund["code"], "name": fund["name"], "donor_words": fund["donor_words"], "rules": rules},
         "shop": json.loads(req["shop_json"]),
+        "receipt_url": f"/api/requests/{request_id}/receipt" if req["receipt_sha"] else None,
         "items": [{"key": i["item_key"], "receipt_text": i["receipt_text"], "label": i["label"], "qty": i["qty"],
-                   "unit_cents": i["unit_cents"], "total_cents": ledger.item_total_cents(i),
+                   "unit_cents": i["unit_cents"], "total_cents": ledger.item_total_cents(i), "category": i["category"],
+                   "box": json.loads(i["box_json"]) if i["box_json"] else None,
                    "verdict": i["verdict"], "reason": i["reason"]} for i in items],
+        "flags": review_info.get("flags", []),
+        "ai": {k: review_info[k] for k in ("model", "cached") if k in review_info} or None,
         "requested_cents": requested,
         "payable_cents": payable,
         "funding": funding,
@@ -206,6 +213,74 @@ def apply_payout_batch(conn: sqlite3.Connection, request_id: str, batch: dict[st
         conn.execute("UPDATE requests SET status = 'paid' WHERE id = ? AND status = 'paying'", (request_id,))
 
 
+# AI review ---------------------------------------------------------------------------------
+
+def parse_limits(conn: sqlite3.Connection, llm: LLM, donor_words: str, today: str | None = None) -> dict[str, Any]:
+    """Donor's plain words -> structured policy (model), plus display chips.
+
+    `today` anchors phrases like "by the end of the year"; pass the fund's creation date so the
+    prompt (and its cache key) stays the same from day to day.
+    """
+    prompt = review.LIMITS_PROMPT.format(today=today or now_iso()[:10], words=donor_words.strip())
+    answer = llm.ask(conn, task="limits", prompt=prompt, schema=review.LIMITS_SCHEMA)
+    policy = answer.data
+    return {"policy": policy, "rules": review.policy_chips(policy), "model": answer.model, "cached": answer.cached}
+
+
+def _next_request_id(conn: sqlite3.Connection) -> str:
+    row = conn.execute("SELECT MAX(CAST(substr(id, 4) AS INTEGER)) FROM requests WHERE id LIKE 'KT-%'").fetchone()
+    return f"KT-{(row[0] or 0) + 1:04d}"
+
+
+def create_request(conn: sqlite3.Connection, llm: LLM, *, fund_code: str, partner_id: str, purpose: str,
+                   image: bytes, mime: str, request_id: str | None = None,
+                   submitted_at: str | None = None) -> dict[str, Any]:
+    """A partner's spending request: read the receipt with the model, then judge it with the rules."""
+    fund = conn.execute("SELECT * FROM funds WHERE code = ?", (fund_code,)).fetchone()
+    if fund is None:
+        raise NotFound(f"no fund {fund_code}")
+    if conn.execute("SELECT 1 FROM partners WHERE id = ?", (partner_id,)).fetchone() is None:
+        raise NotFound(f"no partner {partner_id}")
+    if not fund["policy_json"]:
+        raise Conflict(f"fund {fund_code} has no structured limits yet")
+
+    sha = hashlib.sha256(image).hexdigest()
+    earlier = conn.execute("SELECT id FROM requests WHERE receipt_sha = ? ORDER BY submitted_at LIMIT 1", (sha,)).fetchone()
+    answer = llm.ask(conn, task="receipt", prompt=review.RECEIPT_PROMPT, schema=review.RECEIPT_SCHEMA,
+                     image=image, mime=mime)
+    result = review.judge(answer.data, json.loads(fund["policy_json"]), duplicate_of=earlier["id"] if earlier else None)
+
+    shop = {"name": result.shop.get("name", ""), "branch": result.shop.get("branch", ""),
+            "printed_at": result.shop.get("printed_at", ""), "region": result.shop.get("region", "")}
+    review_info = {"flags": result.flags, "model": answer.model, "cached": answer.cached,
+                   "receipt_total_cents": result.receipt_total_cents}
+    with transaction(conn):
+        request_id = request_id or _next_request_id(conn)
+        conn.execute("INSERT OR IGNORE INTO receipts (sha256, mime, bytes, created_at) VALUES (?, ?, ?, ?)",
+                     (sha, mime, image, now_iso()))
+        conn.execute(
+            "INSERT INTO requests (id, fund_code, partner_id, purpose, shop_json, status, submitted_at, receipt_sha, "
+            "review_json) VALUES (?, ?, ?, ?, ?, 'reviewed', ?, ?, ?)",
+            (request_id, fund_code, partner_id, purpose, json.dumps(shop), submitted_at or now_iso(), sha,
+             json.dumps(review_info)),
+        )
+        conn.executemany(
+            "INSERT INTO request_items (request_id, item_key, receipt_text, label, qty, unit_cents, verdict, reason, "
+            "category, box_json) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+            [(request_id, f"line-{n + 1}", ln.receipt_text, ln.label, ln.qty, ln.unit_cents, ln.verdict, ln.reason,
+              ln.category, json.dumps(ln.box) if ln.box else None) for n, ln in enumerate(result.lines)],
+        )
+    return request_detail(conn, request_id)
+
+
+def receipt_image(conn: sqlite3.Connection, request_id: str) -> tuple[bytes, str]:
+    row = conn.execute("SELECT r.bytes, r.mime FROM requests q JOIN receipts r ON r.sha256 = q.receipt_sha "
+                       "WHERE q.id = ?", (request_id,)).fetchone()
+    if row is None:
+        raise NotFound(f"request {request_id} has no receipt photo")
+    return row["bytes"], row["mime"]
+
+
 # Webhooks ---------------------------------------------------------------------------------
 
 def handle_webhook(conn: sqlite3.Connection, event: dict[str, Any], verified: bool) -> str:
@@ -251,7 +326,7 @@ def fund_summary(conn: sqlite3.Connection, fund_code: str) -> dict[str, Any]:
         "code": fund["code"],
         "name": fund["name"],
         "donor_words": fund["donor_words"],
-        "rules": json.loads(fund["rules_json"]),
+        "rules": review.policy_chips(json.loads(fund["policy_json"])) if fund["policy_json"] else json.loads(fund["rules_json"]),
         "received_cents": sum(b.amount_cents for b in balances),
         "spent_cents": sum(b.used_cents for b in balances),
         "available_cents": sum(b.remaining_cents for b in balances),

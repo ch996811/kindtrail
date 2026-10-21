@@ -43,26 +43,52 @@ function Ring({ fits, total }: { fits: number; total: number }) {
   )
 }
 
+const MODEL_NAMES: Record<string, string> = {
+  'gemini-3.5-flash-lite': 'Gemini 3.5 Flash Lite',
+  'gemma-4-31b-it': 'Gemma 4',
+}
+
+function headline(fits: number, blocked: { label: string }[]) {
+  const total = fits + blocked.length
+  if (blocked.length === 0) return 'Every item fits the fund.'
+  if (fits === 0) return "Nothing on this receipt can be paid from donors' money."
+  const what = blocked.length === 1 ? `The ${blocked[0].label.replace(/^\d+ /, '').toLowerCase()} can't` : `${blocked.length} items can't`
+  return `${fits} of ${total} items fit. ${what} be covered by donors' money.`
+}
+
+interface Props {
+  request: ReviewRequest
+  activeItem: string | null
+  onActivate: (id: string | null) => void
+}
+
 /** The AI's verdict: one row per receipt line, revealed in order. */
-export function ReviewPanel({ request }: { request: ReviewRequest }) {
+export function ReviewPanel({ request, activeItem, onActivate }: Props) {
   const fits = request.items.filter((it) => it.verdict === 'fits')
   const requested = request.items.reduce((s, it) => s + lineTotal(it), 0)
   const payable = fits.reduce((s, it) => s + lineTotal(it), 0)
   const blocked = request.items.filter((it) => it.verdict === 'blocked')
+  const reader = MODEL_NAMES[request.aiModel ?? ''] ?? 'Gemini'
 
   return (
     <section className="rounded-[28px] bg-white px-[26px] pt-[26px] pb-[18px]">
       <h2 className="font-heading m-0 mb-1 text-2xl font-bold">What the AI found</h2>
-      <p className="m-0 text-[15px] text-wine-2">Gemini read every line; the rule engine checked it against the donors' limits.</p>
+      <p className="m-0 text-[15px] text-wine-2">{reader} read every line; the rule engine checked it against the donors' limits.</p>
+
+      {request.flags?.map((f) => (
+        <p
+          key={f.kind + f.message}
+          role="alert"
+          className={`mt-4 mb-0 rounded-2xl px-4 py-3 text-[15px] font-medium ${f.severity === 'block' ? 'bg-plum text-white' : 'bg-sun text-wine'}`}
+        >
+          {f.message}
+        </p>
+      ))}
 
       <div className="my-[18px] flex items-center gap-4">
         <Ring fits={fits.length} total={request.items.length} />
         <div>
-          <p className="m-0 text-xl leading-snug font-bold tracking-[-0.01em]">
-            {fits.length === request.items.length
-              ? 'Every item fits the fund.'
-              : `${fits.length} of ${request.items.length} items fit. ${blocked.map((b) => b.label.replace(/^\d+ /, 'The ')).join(', ')} can't be covered by donors' money.`}
-          </p>
+          <p className="m-0 text-xl leading-snug font-bold tracking-[-0.01em]">{headline(fits.length, blocked)}</p>
           <p className="m-0 text-[15px] text-wine-2">
             Suggested payout: {usd(payable)} of {usd(requested)}
           </p>
@@ -72,13 +98,18 @@ export function ReviewPanel({ request }: { request: ReviewRequest }) {
       <ul className="m-0 list-none p-0">
         {request.items.map((it, i) => {
           const ok = it.verdict === 'fits'
+          const active = activeItem === it.id
           return (
             <motion.li
               key={it.id}
+              onMouseEnter={() => onActivate(it.id)}
+              onMouseLeave={() => onActivate(null)}
               initial={{ opacity: 0, scale: 0.96 }}
               animate={{ opacity: 1, scale: 1 }}
               transition={{ delay: 1.9 + i * 0.15, type: 'spring', stiffness: 380, damping: 18 }}
-              className={`-mx-3 grid origin-left grid-cols-[36px_1fr_auto] items-start gap-3 rounded-2xl px-3 py-[13px] ${ok ? '' : 'bg-plum-bg'}`}
+              className={`-mx-3 grid origin-left grid-cols-[36px_1fr_auto] items-start gap-3 rounded-2xl px-3 py-[13px] transition-colors ${
+                ok ? (active ? 'bg-mint-bg/60' : '') : active ? 'bg-petal' : 'bg-plum-bg'
+              }`}
             >
               <span className={`grid size-9 place-items-center rounded-xl ${ok ? 'bg-mint-bg text-mint' : 'bg-plum text-white'}`}>
                 {ok ? <Check /> : <Cross />}

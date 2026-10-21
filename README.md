@@ -20,6 +20,26 @@ Kindtrail closes that loop:
 > Status: in active development for the [PayPal AI Hackathon](https://paypalaihackathon.devpost.com/).
 > Everything runs against the PayPal **sandbox** with made-up data.
 
+## How the AI review works
+
+The model reads; plain Python decides.
+
+1. **Donor limits.** A donor writes their limits in plain words ("only for kids in Hualien, not for staff
+   costs, by the end of the year"). Gemini turns that into a policy: region, allowed and ruled-out
+   spending categories, who it is for, and an end date.
+2. **Receipt reading.** A partner uploads a receipt photo. Gemini returns every line with its quantity,
+   price, a spending category and the line's position on the photo.
+3. **Rule engine.** Deterministic code (`backend/app/review.py`) checks each line against the policy:
+   allowed or ruled-out category, shop region, purchase date, a resubmitted receipt, and arithmetic that
+   doesn't add up. Cash equivalents and alcohol are never paid from restricted gifts.
+4. **Reviewer.** A person sees the photo with every line boxed green or red, the reason for each
+   verdict, and approves the payout.
+
+Models (free tier): `gemini-3.5-flash-lite` with minimal thinking (about 3 s per receipt), falling back
+to `gemma-4-31b-it`. Every answer is cached, a daily cap protects the free quota, and
+`backend/demo/llm_cache.json` ships the answers for the demo receipts, so the hosted demo works even
+with no key (`LLM_PROVIDER=replay`).
+
 ## Stack
 
 - Backend: Python, FastAPI, SQLite
@@ -60,6 +80,9 @@ transaction search), run `python backend/scripts/sandbox_smoke.py`.
 | POST | `/api/gifts` | Create a PayPal order for a gift, tagged with the fund in `custom_id` |
 | POST | `/api/gifts/{order_id}/capture` | Capture an approved order and add the gift to the fund |
 | GET | `/api/funds/{code}` | Fund balance and every gift's spent / left amounts |
+| POST | `/api/limits/parse` | Turn a donor's plain-language limits into a structured policy |
+| POST | `/api/requests` | Upload a receipt photo; the AI reads it and the rule engine judges every line |
+| GET | `/api/requests/{id}/receipt` | The receipt photo |
 | GET | `/api/requests/{id}` | A spending request with its line verdicts and which gifts would pay for it |
 | POST | `/api/requests/{id}/approve` | Allocate gifts oldest-first, then pay the partner through PayPal Payouts |
 | POST | `/api/requests/{id}/refresh` | Pull the payout status from PayPal |

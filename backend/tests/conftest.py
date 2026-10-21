@@ -9,6 +9,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
 from app.config import Settings  # noqa: E402
 from app.db import connect  # noqa: E402
+from app.llm import LLM, ReplayProvider  # noqa: E402
 from app.main import create_app  # noqa: E402
 from app.paypal import PayPalError  # noqa: E402
 
@@ -74,9 +75,16 @@ def conn():
 
 
 @pytest.fixture
-def client(conn, fake_paypal, tmp_path):
+def llm():
+    # Replay only: the committed demo cache answers the demo receipts; anything else is "AI unavailable".
+    return LLM(ReplayProvider(), daily_cap=5)
+
+
+@pytest.fixture
+def client(conn, fake_paypal, llm, tmp_path):
     settings = Settings(paypal_env="sandbox", paypal_client_id="x", paypal_client_secret="y",
-                        paypal_webhook_id="WH-TEST", partner_email=PARTNER_EMAIL,
-                        db_path=":memory:", frontend_dist=str(tmp_path / "no-dist"))
-    with TestClient(create_app(settings, paypal=fake_paypal, conn=conn)) as c:
+                        paypal_webhook_id="WH-TEST", partner_email=PARTNER_EMAIL, llm_provider="replay",
+                        gemini_api_key="", llm_daily_cap=5, db_path=":memory:",
+                        frontend_dist=str(tmp_path / "no-dist"))
+    with TestClient(create_app(settings, paypal=fake_paypal, conn=conn, llm=llm)) as c:
         yield c
