@@ -37,7 +37,7 @@ export function ReviewDesk({ requestId }: { requestId: string }) {
   if (isPending || error) {
     return (
       <header className="rounded-b-[36px] bg-band pb-10">
-        <TopBar active="Requests" />
+        <TopBar active="Review desk" />
         <p className="mx-auto max-w-[1160px] px-6 pt-6 text-lg" role={error ? 'alert' : 'status'}>
           {error ? `Couldn't load request ${requestId}: ${error.message}` : `Loading request ${requestId}...`}
         </p>
@@ -69,7 +69,7 @@ export function ReviewDesk({ requestId }: { requestId: string }) {
   return (
     <>
       <header className="rounded-b-[36px] bg-band pb-[34px]">
-        <TopBar active="Requests" />
+        <TopBar active="Review desk" />
         <div className="mx-auto max-w-[1160px] px-6 pt-[18px]">
           <h1 className="font-display m-0 max-w-[20ch] text-[clamp(30px,4.4vw,52px)] leading-[1.06] font-extrabold">
             {request.partner} needs {usd(data.requested_cents / 100)} for {request.purpose}

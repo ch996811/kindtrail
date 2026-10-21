@@ -132,7 +132,7 @@ def request_detail(conn: sqlite3.Connection, request_id: str) -> dict[str, Any]:
                    "box": json.loads(i["box_json"]) if i["box_json"] else None,
                    "verdict": i["verdict"], "reason": i["reason"]} for i in items],
         "flags": review_info.get("flags", []),
-        "ai": {k: review_info[k] for k in ("model", "cached") if k in review_info} or None,
+        "ai": {k: review_info[k] for k in ("model", "cached", "seconds") if k in review_info} or None,
         "requested_cents": requested,
         "payable_cents": payable,
         "funding": funding,
@@ -252,7 +252,7 @@ def create_request(conn: sqlite3.Connection, llm: LLM, *, fund_code: str, partne
 
     shop = {"name": result.shop.get("name", ""), "branch": result.shop.get("branch", ""),
             "printed_at": result.shop.get("printed_at", ""), "region": result.shop.get("region", "")}
-    review_info = {"flags": result.flags, "model": answer.model, "cached": answer.cached,
+    review_info = {"flags": result.flags, "model": answer.model, "cached": answer.cached, "seconds": answer.seconds,
                    "receipt_total_cents": result.receipt_total_cents}
     with transaction(conn):
         request_id = request_id or _next_request_id(conn)

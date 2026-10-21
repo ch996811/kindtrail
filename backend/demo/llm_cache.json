@@ -167,5 +167,80 @@
     }
    ]
   }
+ },
+ {
+  "key": "e32839bfcdb635d302f1aa7cfb19ef024a94dc86cec937765d2c233a3350ebc7",
+  "task": "receipt",
+  "model": "gemini-3.5-flash-lite",
+  "response": {
+   "readable": true,
+   "shop": {
+    "name": "FAMILY CARE PHARMACY",
+    "branch": "POS 02",
+    "address": "No. 5 Guolian 1st Rd",
+    "region": "Hualien County",
+    "printed_at": "2026-10-26 10:18"
+   },
+   "currency": "USD",
+   "total": 93.5,
+   "items": [
+    {
+     "receipt_text": "Diapers size M 40pc",
+     "label": "3 packs of Diapers size M 40pc",
+     "qty": 3,
+     "unit_price": 11.5,
+     "line_total": 34.5,
+     "category": "children_supplies",
+     "box_2d": [
+      396,
+      209,
+      456,
+      700
+     ]
+    },
+    {
+     "receipt_text": "Baby formula 800g",
+     "label": "2 units of Baby formula 800g",
+     "qty": 2,
+     "unit_price": 18.9,
+     "line_total": 37.8,
+     "category": "children_supplies",
+     "box_2d": [
+      463,
+      205,
+      532,
+      695
+     ]
+    },
+    {
+     "receipt_text": "Bandages + antiseptic",
+     "label": "2 units of Bandages + antiseptic",
+     "qty": 2,
+     "unit_price": 6.4,
+     "line_total": 12.8,
+     "category": "medical",
+     "box_2d": [
+      530,
+      200,
+      600,
+      690
+     ]
+    },
+    {
+     "receipt_text": "Hand soap 3pk",
+     "label": "2 packs of Hand soap 3pk",
+     "qty": 2,
+     "unit_price": 4.2,
+     "line_total": 8.4,
+     "category": "hygiene",
+     "box_2d": [
+      597,
+      195,
+      668,
+      685
+     ]
+    }
+   ]
+  }
  }
 ]

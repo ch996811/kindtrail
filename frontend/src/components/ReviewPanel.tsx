@@ -17,7 +17,7 @@ function Cross() {
   )
 }
 
-function Ring({ fits, total }: { fits: number; total: number }) {
+function Ring({ fits, total, delay }: { fits: number; total: number; delay: number }) {
   const c = 2 * Math.PI * 30
   return (
     <svg className="size-[74px] flex-none" viewBox="0 0 74 74" aria-hidden="true">
@@ -34,7 +34,7 @@ function Ring({ fits, total }: { fits: number; total: number }) {
         strokeDasharray={c}
         initial={{ strokeDashoffset: c }}
         animate={{ strokeDashoffset: c * (1 - fits / total) }}
-        transition={{ delay: 1.6, duration: 0.8, ease: 'easeOut' }}
+        transition={{ delay: Math.max(0, delay), duration: 0.8, ease: 'easeOut' }}
       />
       <text x="37" y="43" textAnchor="middle" className="fill-wine text-lg font-extrabold">
         {fits}/{total}
@@ -60,10 +60,11 @@ interface Props {
   request: ReviewRequest
   activeItem: string | null
   onActivate: (id: string | null) => void
+  revealDelay?: number // seconds before the verdict rows start appearing
 }
 
 /** The AI's verdict: one row per receipt line, revealed in order. */
-export function ReviewPanel({ request, activeItem, onActivate }: Props) {
+export function ReviewPanel({ request, activeItem, onActivate, revealDelay = 1.9 }: Props) {
   const fits = request.items.filter((it) => it.verdict === 'fits')
   const requested = request.items.reduce((s, it) => s + lineTotal(it), 0)
   const payable = fits.reduce((s, it) => s + lineTotal(it), 0)
@@ -86,7 +87,7 @@ export function ReviewPanel({ request, activeItem, onActivate }: Props) {
       ))}
 
       <div className="my-[18px] flex items-center gap-4">
-        <Ring fits={fits.length} total={request.items.length} />
+        <Ring fits={fits.length} total={request.items.length} delay={revealDelay - 0.3} />
         <div>
           <p className="m-0 text-xl leading-snug font-bold tracking-[-0.01em]">{headline(fits.length, blocked)}</p>
           <p className="m-0 text-[15px] text-wine-2">
@@ -106,7 +107,7 @@ export function ReviewPanel({ request, activeItem, onActivate }: Props) {
               onMouseLeave={() => onActivate(null)}
               initial={{ opacity: 0, scale: 0.96 }}
               animate={{ opacity: 1, scale: 1 }}
-              transition={{ delay: 1.9 + i * 0.15, type: 'spring', stiffness: 380, damping: 18 }}
+              transition={{ delay: revealDelay + i * 0.15, type: 'spring', stiffness: 380, damping: 18 }}
               className={`-mx-3 grid origin-left grid-cols-[36px_1fr_auto] items-start gap-3 rounded-2xl px-3 py-[13px] transition-colors ${
                 ok ? (active ? 'bg-mint-bg/60' : '') : active ? 'bg-petal' : 'bg-plum-bg'
               }`}

@@ -15,7 +15,7 @@ export interface RequestDetail {
   receipt_url: string | null
   items: { key: string; receipt_text: string; label: string; qty: number; unit_cents: number; total_cents: number; category: string | null; box: [number, number, number, number] | null; verdict: 'fits' | 'blocked'; reason: string }[]
   flags: { kind: string; severity: 'block' | 'check'; message: string }[]
-  ai: { model: string; cached: boolean } | null
+  ai: { model: string; cached: boolean; seconds?: number } | null
   requested_cents: number
   payable_cents: number
   funding: { gift_id: number; donor: string; date: string; given_cents: number; used_here_cents: number; left_cents: number }[]
@@ -43,7 +43,37 @@ async function call<T>(method: 'GET' | 'POST', path: string, body?: unknown): Pr
   return data as T
 }
 
+export interface FundSummary {
+  code: string
+  name: string
+  donor_words: string
+  rules: { kind: string; value: string }[]
+  received_cents: number
+  available_cents: number
+  gifts: { gift_id: number; donor: string }[]
+}
+
+export interface DemoReceipt {
+  name: string
+  url: string
+}
+
 export const getRequest = (id: string) => call<RequestDetail>('GET', `/api/requests/${id}`)
+export const getFund = (code: string) => call<FundSummary>('GET', `/api/funds/${code}`)
+export const listDemoReceipts = () => call<DemoReceipt[]>('GET', '/api/demo/receipts')
+
+/** Upload a receipt photo; the backend reads it with the AI and judges every line. */
+export async function submitReceipt(form: { fundCode: string; partnerId: string; purpose: string; photo: File }) {
+  const body = new FormData()
+  body.append('fund_code', form.fundCode)
+  body.append('partner_id', form.partnerId)
+  body.append('purpose', form.purpose)
+  body.append('receipt', form.photo)
+  const r = await fetch('/api/requests', { method: 'POST', body })
+  const data = await r.json().catch(() => ({}))
+  if (!r.ok) throw new ApiError(r.status, data.message ?? `Upload failed (${r.status})`)
+  return data as RequestDetail
+}
 export const approveRequest = (id: string, approver: string) => call<RequestDetail>('POST', `/api/requests/${id}/approve`, { approver })
 export const refreshRequest = (id: string) => call<RequestDetail>('POST', `/api/requests/${id}/refresh`)
 

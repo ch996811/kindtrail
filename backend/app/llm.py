@@ -10,6 +10,7 @@ import base64
 import hashlib
 import json
 import sqlite3
+import time
 from dataclasses import dataclass
 from datetime import datetime, timezone
 from typing import Any, Protocol
@@ -35,6 +36,7 @@ class Answer:
     data: dict[str, Any]
     model: str
     cached: bool
+    seconds: float = 0.0  # how long the live call took; 0 for cached answers
 
 
 class Provider(Protocol):
@@ -103,10 +105,12 @@ class LLM:
         conn.execute("INSERT INTO llm_usage (day, calls) VALUES (?, 1) "
                      "ON CONFLICT(day) DO UPDATE SET calls = calls + 1", (today,))
 
+        started = time.monotonic()
         data, model = self.provider.generate_json(prompt=prompt, schema=schema, image=image, mime=mime)
+        seconds = round(time.monotonic() - started, 1)
         conn.execute("INSERT OR REPLACE INTO llm_cache (key, task, model, response, created_at) VALUES (?, ?, ?, ?, ?)",
                      (key, task, model, json.dumps(data), now_iso()))
-        return Answer(data, model, cached=False)
+        return Answer(data, model, cached=False, seconds=seconds)
 
 
 def cache_key(task: str, prompt: str, schema: dict, image: bytes | None) -> str:

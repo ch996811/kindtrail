@@ -7,8 +7,7 @@ from pathlib import Path
 from typing import Any
 
 from fastapi import Body, Depends, FastAPI, File, Form, Request, UploadFile
-from fastapi.responses import JSONResponse, Response
-from fastapi.staticfiles import StaticFiles
+from fastapi.responses import FileResponse, JSONResponse, Response
 from pydantic import BaseModel, Field
 
 from . import ledger, service
@@ -16,7 +15,7 @@ from .config import Settings, load_settings
 from .db import connect
 from .llm import AIUnavailable, LLM, make_llm
 from .paypal import PayPalClient, PayPalError
-from .seed import seed
+from .seed import DEMO_DIR, seed
 
 
 class GiftIn(BaseModel):
@@ -122,6 +121,17 @@ def create_app(settings: Settings | None = None, paypal: Any = None, conn: sqlit
         return service.create_request(conn, llm, fund_code=fund_code, partner_id=partner_id, purpose=purpose,
                                       image=image, mime=receipt.content_type)
 
+    @app.get("/api/demo/receipts")
+    def demo_receipts():
+        return [{"name": p.stem, "url": f"/api/demo/receipts/{p.name}"} for p in sorted((DEMO_DIR / "receipts").glob("*.jpg"))]
+
+    @app.get("/api/demo/receipts/{filename}")
+    def demo_receipt(filename: str):
+        path = (DEMO_DIR / "receipts" / filename).resolve()
+        if path.parent != (DEMO_DIR / "receipts").resolve() or not path.is_file():
+            raise service.NotFound(f"no demo receipt {filename}")
+        return FileResponse(path, media_type="image/jpeg")
+
     @app.get("/api/requests/{request_id}/receipt")
     def get_receipt(request_id: str, conn: sqlite3.Connection = Depends(db)):
         data, mime = service.receipt_image(conn, request_id)
@@ -165,9 +175,17 @@ def create_app(settings: Settings | None = None, paypal: Any = None, conn: sqlit
                 verified = False
         return {"result": service.handle_webhook(conn, event, verified)}
 
-    dist = Path(settings.frontend_dist)
+    dist = Path(settings.frontend_dist).resolve()
     if dist.is_dir():
-        app.mount("/", StaticFiles(directory=dist, html=True), name="frontend")
+        @app.get("/{path:path}", include_in_schema=False)
+        def frontend(path: str):
+            # Built assets are served as files; any other path is a page of the single-page app.
+            if path.startswith("api/"):
+                raise service.NotFound(f"no API route /{path}")
+            file = (dist / path).resolve()
+            if path and file.is_file() and dist in file.parents:
+                return FileResponse(file)
+            return FileResponse(dist / "index.html")
 
     return app
 

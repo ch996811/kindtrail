@@ -172,3 +172,32 @@ def test_only_photos_are_accepted(client, tmp_path):
     doc = tmp_path / "receipt.pdf"
     doc.write_bytes(b"%PDF")
     assert upload(client, doc, mime="application/pdf").status_code == 409
+
+
+def test_demo_receipts_are_listed_and_served_but_nothing_outside_the_folder(client):
+    demos = client.get("/api/demo/receipts").json()
+    assert {d["name"] for d in demos} == {"hualien-home-mart", "hualien-family-pharmacy", "taipei-corner-store"}
+    assert client.get(demos[0]["url"]).headers["content-type"] == "image/jpeg"
+    assert client.get("/api/demo/receipts/..%2F..%2Fapp%2Fconfig.py").status_code == 404
+    assert client.get("/api/demo/receipts/nope.jpg").status_code == 404
+
+
+def test_pages_of_the_single_page_app_fall_back_to_index_html(conn, fake_paypal, llm, tmp_path):
+    from fastapi.testclient import TestClient
+
+    from app.config import Settings
+    from app.main import create_app
+
+    dist = tmp_path / "dist"
+    (dist / "assets").mkdir(parents=True)
+    (dist / "index.html").write_text("<div id=root></div>")
+    (dist / "assets" / "app.js").write_text("console.log(1)")
+    settings = Settings(paypal_env="sandbox", paypal_client_id="x", paypal_client_secret="y", paypal_webhook_id="",
+                        partner_email=PARTNER_EMAIL, llm_provider="replay", gemini_api_key="", llm_daily_cap=5,
+                        db_path=":memory:", frontend_dist=str(dist))
+    with TestClient(create_app(settings, paypal=fake_paypal, conn=conn, llm=llm)) as c:
+        assert c.get("/submit").text == "<div id=root></div>"
+        assert c.get("/requests/KT-0142").text == "<div id=root></div>"
+        assert c.get("/assets/app.js").text == "console.log(1)"
+        assert c.get("/api/nope").status_code == 404
+        assert c.get("/api/health").json()["ok"] is True

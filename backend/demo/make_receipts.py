@@ -29,6 +29,13 @@ RECEIPTS = {
                   ("Beer 6-pack", 2, 9.90), ("Phone top-up card", 1, 15.00)],
         "footer": ["Paid: CASH", "See you again!"],
     },
+    "hualien-family-pharmacy": {
+        "header": ["FAMILY CARE PHARMACY", "Hualien City", "No. 5 Guolian 1st Rd", "Hualien County"],
+        "meta": ["2026-10-26 10:18   POS 02", "Cashier: Lin"],
+        "items": [("Diapers size M 40pc", 3, 11.50), ("Baby formula 800g", 2, 18.90),
+                  ("Bandages + antiseptic", 2, 6.40), ("Hand soap 3pk", 2, 4.20)],
+        "footer": ["Paid: CARD ****9021", "Get well soon!"],
+    },
 }
 
 

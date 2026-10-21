@@ -1,26 +1,32 @@
-const NAV = ['Funds', 'Requests', 'Donors', 'Reconcile'] as const
+import { Link } from 'react-router'
 
-export function TopBar({ active }: { active: (typeof NAV)[number] }) {
+// Only pages that exist. Funds, donors and reconciliation join as they're built.
+const NAV = [
+  { label: 'Review desk', to: '/' },
+  { label: 'Send a receipt', to: '/submit' },
+] as const
+
+export function TopBar({ active }: { active: (typeof NAV)[number]['label'] }) {
   return (
-    <div className="mx-auto flex max-w-[1160px] items-center gap-6 px-6 py-[18px]">
-      <a href="/" className="flex items-baseline gap-2 text-wine no-underline">
+    <div className="mx-auto flex max-w-[1160px] items-center gap-x-6 gap-y-3 px-6 py-[18px] max-md:flex-wrap">
+      <Link to="/" className="flex items-baseline gap-2 text-wine no-underline">
         <b className="text-2xl font-extrabold tracking-[-0.015em] [font-variation-settings:'opsz'_96,'wdth'_95]">kindtrail</b>
         <span className="font-tc text-base leading-none font-black text-pink-deep">善蹤</span>
-      </a>
-      <nav aria-label="Main" className="flex gap-1 max-md:hidden">
+      </Link>
+      <nav aria-label="Main" className="flex gap-1 max-md:order-last max-md:w-full">
         {NAV.map((item) => (
-          <a
-            key={item}
-            href="#"
-            aria-current={item === active ? 'page' : undefined}
+          <Link
+            key={item.label}
+            to={item.to}
+            aria-current={item.label === active ? 'page' : undefined}
             className={
-              item === active
-                ? 'rounded-full bg-white px-3.5 py-1.5 font-medium text-wine'
-                : 'rounded-full px-3.5 py-1.5 font-medium text-wine/70 hover:text-wine'
+              item.label === active
+                ? 'rounded-full bg-white px-3.5 py-1.5 font-medium text-wine no-underline'
+                : 'rounded-full px-3.5 py-1.5 font-medium text-wine/70 no-underline hover:text-wine'
             }
           >
-            {item}
-          </a>
+            {item.label}
+          </Link>
         ))}
       </nav>
       <div className="ml-auto flex items-center gap-2.5 text-sm">
