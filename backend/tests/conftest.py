@@ -84,7 +84,7 @@ def llm():
 def client(conn, fake_paypal, llm, tmp_path):
     settings = Settings(paypal_env="sandbox", paypal_client_id="x", paypal_client_secret="y",
                         paypal_webhook_id="WH-TEST", partner_email=PARTNER_EMAIL, llm_provider="replay",
-                        gemini_api_key="", llm_daily_cap=5, db_path=":memory:",
+                        gemini_api_key="", llm_daily_cap=5, demo_mode=False, db_path=":memory:",
                         frontend_dist=str(tmp_path / "no-dist"))
     with TestClient(create_app(settings, paypal=fake_paypal, conn=conn, llm=llm)) as c:
         yield c

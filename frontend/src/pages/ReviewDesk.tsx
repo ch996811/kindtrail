@@ -6,7 +6,7 @@ import { ReviewPanel } from '../components/ReviewPanel'
 import { SideTiles } from '../components/SideTiles'
 import { TopBar } from '../components/TopBar'
 import { Trail } from '../components/Trail'
-import { approveRequest, getRequest, refreshRequest, toReviewModel } from '../api'
+import { approveRequest, getConfig, getRequest, refreshRequest, resetDemo, toReviewModel } from '../api'
 import { usd } from '../model'
 
 const APPROVER = 'Lin'
@@ -27,6 +27,15 @@ export function ReviewDesk({ requestId }: { requestId: string }) {
     },
     enabled: data?.status === 'paying',
     refetchInterval: 2000,
+  })
+
+  const config = useQuery({ queryKey: ['config'], queryFn: getConfig, staleTime: Infinity })
+  const reset = useMutation({
+    mutationFn: resetDemo,
+    onSuccess: () => {
+      approve.reset()
+      qc.invalidateQueries()
+    },
   })
 
   const approve = useMutation({
@@ -81,6 +90,16 @@ export function ReviewDesk({ requestId }: { requestId: string }) {
                 ? `Sending ${usd(data.payable_cents / 100)} through PayPal Payouts. This usually takes a few seconds.`
                 : `Request ${request.id} from the ${request.fund}. The AI has checked the receipt; it's your call now.`}
           </p>
+          {stage === 'paid' && config.data?.demo_mode && (
+            <button
+              type="button"
+              onClick={() => reset.mutate()}
+              disabled={reset.isPending}
+              className="mt-3 rounded-full bg-white/70 px-4 py-1.5 text-sm font-semibold text-wine hover:bg-white disabled:opacity-60"
+            >
+              {reset.isPending ? 'Resetting...' : 'Run the demo again'}
+            </button>
+          )}
           <Trail stops={stops} current={stage === 'paid' ? 3 : 2} />
         </div>
       </header>

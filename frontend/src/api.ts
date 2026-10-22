@@ -124,7 +124,8 @@ export interface GiftImpact {
 }
 
 export const getGiftImpact = (id: string | number) => call<GiftImpact>('GET', `/api/gifts/${id}/impact`)
-export const getConfig = () => call<{ paypal_client_id: string; paypal_env: string }>('GET', '/api/config')
+export const getConfig = () => call<{ paypal_client_id: string; paypal_env: string; demo_mode: boolean }>('GET', '/api/config')
+export const resetDemo = () => call<{ ok: boolean }>('POST', '/api/demo/reset')
 export const createGift = (body: { fund_code: string; donor_name: string; amount_cents: number }) =>
   call<{ gift_id: number; order_id: string; approve_url: string | null }>('POST', '/api/gifts', body)
 export const captureGift = (orderId: string) =>

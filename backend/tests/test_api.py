@@ -193,7 +193,7 @@ def test_pages_of_the_single_page_app_fall_back_to_index_html(conn, fake_paypal,
     (dist / "index.html").write_text("<div id=root></div>")
     (dist / "assets" / "app.js").write_text("console.log(1)")
     settings = Settings(paypal_env="sandbox", paypal_client_id="x", paypal_client_secret="y", paypal_webhook_id="",
-                        partner_email=PARTNER_EMAIL, llm_provider="replay", gemini_api_key="", llm_daily_cap=5,
+                        partner_email=PARTNER_EMAIL, llm_provider="replay", gemini_api_key="", llm_daily_cap=5, demo_mode=False,
                         db_path=":memory:", frontend_dist=str(dist))
     with TestClient(create_app(settings, paypal=fake_paypal, conn=conn, llm=llm)) as c:
         assert c.get("/submit").text == "<div id=root></div>"
@@ -265,7 +265,7 @@ def test_parse_limits_with_a_live_model(conn, fake_paypal, tmp_path):
             return {**KIDS_POLICY, "region": "Taitung County"}, "fake-model"
 
     settings = Settings(paypal_env="sandbox", paypal_client_id="x", paypal_client_secret="y", paypal_webhook_id="",
-                        partner_email=PARTNER_EMAIL, llm_provider="gemini", gemini_api_key="k", llm_daily_cap=50,
+                        partner_email=PARTNER_EMAIL, llm_provider="gemini", gemini_api_key="k", llm_daily_cap=50, demo_mode=False,
                         db_path=":memory:", frontend_dist=str(tmp_path / "none"))
     with TestClient(create_app(settings, paypal=fake_paypal, conn=conn, llm=LLM(Model()))) as c:
         calls_after_seed = Model.calls
@@ -310,5 +310,28 @@ def test_an_unspent_gift_has_no_spends_yet(client):
 
 def test_public_config_exposes_the_client_id_but_never_the_secret(client):
     body = client.get("/api/config").json()
-    assert body == {"paypal_client_id": "x", "paypal_env": "sandbox"}
+    assert body == {"paypal_client_id": "x", "paypal_env": "sandbox", "demo_mode": False}
     assert "y" not in str(body.values())
+
+
+def test_demo_reset_is_off_unless_demo_mode(client):
+    assert client.post("/api/demo/reset").status_code == 404
+
+
+def test_demo_mode_seeds_gifts_and_reset_lets_the_demo_run_again(conn, fake_paypal, llm, tmp_path):
+    from fastapi.testclient import TestClient
+
+    from app.config import Settings
+    from app.main import create_app
+
+    settings = Settings(paypal_env="sandbox", paypal_client_id="x", paypal_client_secret="y", paypal_webhook_id="",
+                        partner_email=PARTNER_EMAIL, llm_provider="replay", gemini_api_key="", llm_daily_cap=5,
+                        demo_mode=True, db_path=":memory:", frontend_dist=str(tmp_path / "none"))
+    with TestClient(create_app(settings, paypal=fake_paypal, conn=conn, llm=llm)) as c:
+        assert c.get(f"/api/funds/{FUND}").json()["available_cents"] == 9500
+        assert c.post("/api/requests/KT-0142/approve").json()["status"] == "paying"
+        assert c.post("/api/demo/reset").json() == {"ok": True}
+        again = c.get("/api/requests/KT-0142").json()
+        assert again["status"] == "reviewed" and again["payout"] is None
+        assert c.get(f"/api/funds/{FUND}").json()["available_cents"] == 9500
+        assert c.post("/api/requests/KT-0142/approve").status_code == 200

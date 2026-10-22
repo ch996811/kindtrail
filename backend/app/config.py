@@ -28,6 +28,7 @@ class Settings:
     llm_provider: str
     gemini_api_key: str
     llm_daily_cap: int
+    demo_mode: bool
     db_path: str
     frontend_dist: str
 
@@ -56,6 +57,8 @@ def load_settings() -> Settings:
         llm_provider=get("LLM_PROVIDER", "gemini"),
         gemini_api_key=get("GEMINI_API_KEY"),
         llm_daily_cap=int(get("LLM_DAILY_CAP", "300")),
+        # Hosted demo: seed made-up gifts and allow anyone to reset the demo request.
+        demo_mode=get("DEMO_MODE", "0") == "1",
         db_path=get("DB_PATH", str(REPO_ROOT / "backend" / "kindtrail.db")),
         frontend_dist=get("FRONTEND_DIST", str(REPO_ROOT / "frontend" / "dist")),
     )

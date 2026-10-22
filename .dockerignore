@@ -1,0 +1,12 @@
+.git
+.env
+.env.*
+.venv
+.claude
+**/__pycache__
+**/*.db
+**/*.db-wal
+**/*.db-shm
+frontend/node_modules
+frontend/dist
+backend/tests

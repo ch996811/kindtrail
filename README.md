@@ -75,6 +75,25 @@ npm run dev        # http://localhost:5173, proxies /api to :8000
 To check that a sandbox app has everything Kindtrail needs (orders, payouts, balances,
 transaction search), run `python backend/scripts/sandbox_smoke.py`.
 
+## Deploy (Render, free)
+
+`render.yaml` describes one free Docker web service (`Dockerfile` builds the React app, then runs
+FastAPI, which serves it). In Render: **New > Blueprint**, pick this repo, and fill in the secrets it
+asks for (`PAYPAL_CLIENT_ID`, `PAYPAL_CLIENT_SECRET`, `PAYPAL_SANDBOX_PERSONAL_EMAIL`,
+`GEMINI_API_KEY`; `PAYPAL_WEBHOOK_ID` can wait until the webhook exists).
+
+With `DEMO_MODE=1` the app seeds three made-up gifts and offers a "Run the demo again" button.
+Free instances sleep after 15 idle minutes and their disk resets, so every wake-up is a fresh demo
+(the first request after a nap takes about a minute). Without a Gemini key the app replays the
+cached AI answers for the demo receipts.
+
+To try the image locally:
+
+```bash
+docker build -t kindtrail .
+docker run --rm -p 8000:8000 -e DEMO_MODE=1 --env-file .env kindtrail
+```
+
 ## API
 
 | Method | Path | What it does |
@@ -93,6 +112,9 @@ transaction search), run `python backend/scripts/sandbox_smoke.py`.
 | POST | `/api/requests/{id}/refresh` | Pull the payout status from PayPal |
 | GET | `/api/reconcile` | Match the ledger against PayPal Transaction Search |
 | POST | `/api/webhooks/paypal` | Verified PayPal webhooks (captures, payout items) |
+| GET | `/api/gifts/{id}/impact` | A donor's receipt: which lines their gift paid for, and the payout that proves it |
+| GET | `/api/config` | Public settings for the browser (PayPal client id, demo mode) |
+| POST | `/api/demo/reset` | Demo mode only: clear the ledger so the demo can run again |
 
 ## License
 

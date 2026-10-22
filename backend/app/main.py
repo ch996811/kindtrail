@@ -15,7 +15,7 @@ from .config import Settings, load_settings
 from .db import connect
 from .llm import AIUnavailable, LLM, make_llm
 from .paypal import PayPalClient, PayPalError
-from .seed import DEMO_DIR, seed
+from .seed import DEMO_DIR, reset_demo, seed
 
 
 class GiftIn(BaseModel):
@@ -70,7 +70,7 @@ def create_app(settings: Settings | None = None, paypal: Any = None, conn: sqlit
     @asynccontextmanager
     async def lifespan(app: FastAPI):
         setup = conn or connect(settings.db_path)  # creates the schema
-        seed(setup, settings.partner_email, llm)
+        seed(setup, settings.partner_email, llm, demo_gifts=settings.demo_mode)
         if conn is None:
             setup.close()
         app.state.paypal = paypal or PayPalClient(settings.paypal_base_url, settings.paypal_client_id,
@@ -121,7 +121,15 @@ def create_app(settings: Settings | None = None, paypal: Any = None, conn: sqlit
     @app.get("/api/config")
     def public_config() -> dict[str, Any]:
         # The client id is public by design (the PayPal SDK needs it in the browser); the secret never leaves the server.
-        return {"paypal_client_id": settings.paypal_client_id, "paypal_env": settings.paypal_env}
+        return {"paypal_client_id": settings.paypal_client_id, "paypal_env": settings.paypal_env,
+                "demo_mode": settings.demo_mode}
+
+    @app.post("/api/demo/reset")
+    def demo_reset(conn: sqlite3.Connection = Depends(db)):
+        if not settings.demo_mode:
+            raise service.NotFound("demo reset is only available in demo mode")
+        reset_demo(conn)
+        return {"ok": True}
 
     @app.get("/api/funds")
     def list_funds(conn: sqlite3.Connection = Depends(db)):

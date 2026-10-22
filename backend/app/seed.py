@@ -80,6 +80,15 @@ def seed(conn: sqlite3.Connection, partner_email: str, llm: LLM | None = None, d
             [(FUND_CODE, name, cents, at, at) for name, cents, at in DEMO_GIFTS])
 
 
+def reset_demo(conn: sqlite3.Connection) -> None:
+    """Put every request back to 'reviewed' and clear the ledger, so visitors can run the demo again.
+    Sandbox payouts already sent stay sent; only Kindtrail's own records are cleared."""
+    with transaction(conn):
+        conn.execute("DELETE FROM allocations")
+        conn.execute("DELETE FROM payouts")
+        conn.execute("UPDATE requests SET status = 'reviewed', approved_by = NULL, approved_at = NULL")
+
+
 def reset_request(conn: sqlite3.Connection, request_id: str = "KT-0142") -> None:
     """Put a request back to 'reviewed' so the demo can be run again. Sandbox money already sent stays sent."""
     with transaction(conn):
