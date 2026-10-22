@@ -201,3 +201,77 @@ def test_pages_of_the_single_page_app_fall_back_to_index_html(conn, fake_paypal,
         assert c.get("/assets/app.js").text == "console.log(1)"
         assert c.get("/api/nope").status_code == 404
         assert c.get("/api/health").json()["ok"] is True
+
+
+# Funds and donor limits ----------------------------------------------------------------------
+
+KIDS_POLICY = {"region": "Hualien County", "allowed": ["shelter", "food", "water", "children_supplies"],
+               "never": ["staff_cost"], "beneficiaries": "kids", "until": "2026-12-31"}
+
+
+def test_categories_list_every_spending_category(client):
+    body = client.get("/api/limits/categories").json()
+    assert len(body["categories"]) == 14
+    assert {"key": "children_supplies", "label": "kids' supplies"} in body["categories"]
+    assert body["always_never"] == ["alcohol_tobacco", "cash_equivalent"]
+
+
+def test_preview_shows_how_a_policy_would_judge_receipts_already_read(client):
+    rows = {r["name"]: r for r in client.post("/api/limits/preview", json=KIDS_POLICY).json()}
+    assert (rows["hualien-home-mart"]["fits"], rows["hualien-home-mart"]["payable_cents"]) == (3, 7760)
+    assert rows["hualien-family-pharmacy"]["fits"] == 2
+    assert rows["taipei-corner-store"]["fits"] == 0
+    assert rows["taipei-corner-store"]["flags"][0]["kind"] == "region"
+
+    # Same receipts, a Taipei food-and-water fund: now the corner store's water and noodles fit.
+    taipei = {"region": "Taipei City", "allowed": ["food", "water"], "never": [], "beneficiaries": None, "until": None}
+    rows = {r["name"]: r for r in client.post("/api/limits/preview", json=taipei).json()}
+    assert (rows["taipei-corner-store"]["fits"], rows["taipei-corner-store"]["payable_cents"]) == (2, 2630)
+    assert rows["hualien-home-mart"]["fits"] == 0
+
+
+def test_create_and_list_funds(client):
+    body = {"name": "Taitung Flood Families", "donor_words": "Food and water for flooded families in Taitung.",
+            "policy": {"region": "Taitung County", "allowed": ["food", "water", "cash_equivalent"], "never": []}}
+    r = client.post("/api/funds", json=body)
+    assert r.status_code == 201, r.text
+    fund = r.json()
+    assert fund["code"] == "FUND-TAITUNG-FLOOD-FAMILIES"
+    assert [c["kind"] for c in fund["rules"]] == ["Where", "For", "Never"]
+    assert "cash equivalents" not in fund["rules"][1]["value"]  # stripped from allowed
+    assert client.post("/api/funds", json=body).json()["code"] == "FUND-TAITUNG-FLOOD-FAMILIES-2"
+    codes = [f["code"] for f in client.get("/api/funds").json()]
+    assert codes == ["FUND-HUALIEN-KIDS", "FUND-TAITUNG-FLOOD-FAMILIES", "FUND-TAITUNG-FLOOD-FAMILIES-2"]
+
+
+def test_a_fund_must_allow_something_and_only_known_categories(client):
+    base = {"name": "Empty fund", "donor_words": "nothing at all"}
+    assert client.post("/api/funds", json={**base, "policy": {"allowed": []}}).status_code == 409
+    assert client.post("/api/funds", json={**base, "policy": {"allowed": ["yachts"]}}).status_code == 422
+
+
+def test_parse_limits_with_a_live_model(conn, fake_paypal, tmp_path):
+    from fastapi.testclient import TestClient
+
+    from app.config import Settings
+    from app.llm import LLM
+    from app.main import create_app
+
+    class Model:
+        calls = 0
+
+        def generate_json(self, **_):
+            Model.calls += 1
+            return {**KIDS_POLICY, "region": "Taitung County"}, "fake-model"
+
+    settings = Settings(paypal_env="sandbox", paypal_client_id="x", paypal_client_secret="y", paypal_webhook_id="",
+                        partner_email=PARTNER_EMAIL, llm_provider="gemini", gemini_api_key="k", llm_daily_cap=50,
+                        db_path=":memory:", frontend_dist=str(tmp_path / "none"))
+    with TestClient(create_app(settings, paypal=fake_paypal, conn=conn, llm=LLM(Model()))) as c:
+        calls_after_seed = Model.calls
+        words = {"donor_words": "Only for kids in Taitung, not staff, by the end of the year."}
+        first = c.post("/api/limits/parse", json=words).json()
+        again = c.post("/api/limits/parse", json=words).json()
+    assert first["policy"]["region"] == "Taitung County" and first["cached"] is False
+    assert again["cached"] is True and Model.calls == calls_after_seed + 1
+    assert first["rules"][0] == {"kind": "Where", "value": "Taitung County"}

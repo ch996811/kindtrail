@@ -223,8 +223,12 @@ def parse_limits(conn: sqlite3.Connection, llm: LLM, donor_words: str, today: st
     """
     prompt = review.LIMITS_PROMPT.format(today=today or now_iso()[:10], words=donor_words.strip())
     answer = llm.ask(conn, task="limits", prompt=prompt, schema=review.LIMITS_SCHEMA)
-    policy = answer.data
-    return {"policy": policy, "rules": review.policy_chips(policy), "model": answer.model, "cached": answer.cached}
+    # Always-refused categories are implicit: keep them out of both lists.
+    policy = {**answer.data,
+              "allowed": [c for c in answer.data.get("allowed", []) if c not in review.ALWAYS_NEVER],
+              "never": [c for c in answer.data.get("never", []) if c not in review.ALWAYS_NEVER]}
+    return {"policy": policy, "rules": review.policy_chips(policy), "model": answer.model, "cached": answer.cached,
+            "seconds": answer.seconds}
 
 
 def _next_request_id(conn: sqlite3.Connection) -> str:
@@ -333,3 +337,57 @@ def fund_summary(conn: sqlite3.Connection, fund_code: str) -> dict[str, Any]:
         "gifts": [{"gift_id": b.gift_id, "donor": b.donor_name, "date": b.captured_at, "given_cents": b.amount_cents,
                    "used_cents": b.used_cents, "left_cents": b.remaining_cents} for b in balances],
     }
+
+
+def list_funds(conn: sqlite3.Connection) -> list[dict[str, Any]]:
+    return [{"code": f["code"], "name": f["name"]} for f in conn.execute("SELECT code, name FROM funds ORDER BY rowid")]
+
+
+def _fund_code(conn: sqlite3.Connection, name: str) -> str:
+    """FUND-<NAME-IN-CAPS>, made unique. It travels to PayPal in purchase_units.custom_id."""
+    slug = "".join(c if c.isascii() and c.isalnum() else "-" for c in name.upper())
+    slug = "-".join(part for part in slug.split("-") if part)[:32] or "GIFTS"
+    code, n = f"FUND-{slug}", 2
+    while conn.execute("SELECT 1 FROM funds WHERE code = ?", (code,)).fetchone():
+        code, n = f"FUND-{slug}-{n}", n + 1
+    return code
+
+
+def create_fund(conn: sqlite3.Connection, *, name: str, donor_words: str, policy: dict[str, Any]) -> dict[str, Any]:
+    if not policy.get("allowed"):
+        raise Conflict("a fund needs at least one use it can pay for")
+    code = _fund_code(conn, name)
+    conn.execute("INSERT INTO funds (code, name, donor_words, rules_json, policy_json) VALUES (?, ?, ?, '[]', ?)",
+                 (code, name.strip(), donor_words.strip(), json.dumps(policy)))
+    return fund_summary(conn, code)
+
+
+# Limits ------------------------------------------------------------------------------------
+
+def categories() -> dict[str, Any]:
+    return {"categories": [{"key": c, "label": review.LABELS[c]} for c in review.CATEGORIES],
+            "always_never": sorted(review.ALWAYS_NEVER)}
+
+
+def preview_policy(conn: sqlite3.Connection, llm: LLM, policy: dict[str, Any],
+                   receipts: list[tuple[str, bytes]]) -> list[dict[str, Any]]:
+    """How a policy would judge receipts the AI has already read. Uses cached readings only."""
+    out = []
+    for name, image in receipts:
+        answer = llm.lookup(conn, task="receipt", prompt=review.RECEIPT_PROMPT, schema=review.RECEIPT_SCHEMA, image=image)
+        if answer is None:
+            continue
+        result = review.judge(answer.data, policy)
+        fits = [ln for ln in result.lines if ln.verdict == "fits"]
+        out.append({
+            "name": name,
+            "shop": result.shop.get("name", ""),
+            "region": result.shop.get("region", ""),
+            "lines": len(result.lines),
+            "fits": len(fits),
+            "requested_cents": sum(ln.line_cents for ln in result.lines),
+            "payable_cents": sum(ln.line_cents for ln in fits),
+            "blocked": [{"label": ln.label, "reason": ln.reason} for ln in result.lines if ln.verdict == "blocked"],
+            "flags": result.flags,
+        })
+    return out

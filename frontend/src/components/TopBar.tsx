@@ -1,9 +1,10 @@
 import { Link } from 'react-router'
 
-// Only pages that exist. Funds, donors and reconciliation join as they're built.
+// Only pages that exist. Donors and reconciliation join as they're built.
 const NAV = [
   { label: 'Review desk', to: '/' },
   { label: 'Send a receipt', to: '/submit' },
+  { label: 'Start a fund', to: '/funds/new' },
 ] as const
 
 export function TopBar({ active }: { active: (typeof NAV)[number]['label'] }) {

@@ -2,15 +2,15 @@
 import sqlite3
 from collections.abc import Iterator
 from contextlib import asynccontextmanager
-from datetime import datetime, timedelta, timezone
+from datetime import date, datetime, timedelta, timezone
 from pathlib import Path
-from typing import Any
+from typing import Any, Literal
 
 from fastapi import Body, Depends, FastAPI, File, Form, Request, UploadFile
 from fastapi.responses import FileResponse, JSONResponse, Response
 from pydantic import BaseModel, Field
 
-from . import ledger, service
+from . import ledger, review, service
 from .config import Settings, load_settings
 from .db import connect
 from .llm import AIUnavailable, LLM, make_llm
@@ -30,6 +30,32 @@ class ApproveIn(BaseModel):
 
 class LimitsIn(BaseModel):
     donor_words: str = Field(min_length=3, max_length=2000)
+
+
+Category = Literal[tuple(review.CATEGORIES)]  # type: ignore[valid-type]
+
+
+class PolicyIn(BaseModel):
+    """A fund's limits after the donor has checked (and maybe edited) what the AI read."""
+    region: str | None = Field(default=None, max_length=80)
+    allowed: list[Category] = Field(default_factory=list, max_length=len(review.CATEGORIES))
+    never: list[Category] = Field(default_factory=list, max_length=len(review.CATEGORIES))
+    beneficiaries: str | None = Field(default=None, max_length=120)
+    until: date | None = None
+
+    def as_policy(self) -> dict[str, Any]:
+        never = set(self.never) - review.ALWAYS_NEVER  # those are refused anyway; no need to store them
+        return {"region": (self.region or "").strip() or None,
+                "allowed": [c for c in review.CATEGORIES if c in set(self.allowed) - never - review.ALWAYS_NEVER],
+                "never": [c for c in review.CATEGORIES if c in never],
+                "beneficiaries": (self.beneficiaries or "").strip() or None,
+                "until": self.until.isoformat() if self.until else None}
+
+
+class FundIn(BaseModel):
+    name: str = Field(min_length=3, max_length=80)
+    donor_words: str = Field(min_length=3, max_length=2000)
+    policy: PolicyIn
 
 
 RECEIPT_TYPES = {"image/jpeg", "image/png", "image/webp"}
@@ -92,6 +118,14 @@ def create_app(settings: Settings | None = None, paypal: Any = None, conn: sqlit
     def health() -> dict[str, Any]:
         return {"ok": True, "paypal_env": settings.paypal_env}
 
+    @app.get("/api/funds")
+    def list_funds(conn: sqlite3.Connection = Depends(db)):
+        return service.list_funds(conn)
+
+    @app.post("/api/funds", status_code=201)
+    def create_fund(body: FundIn, conn: sqlite3.Connection = Depends(db)):
+        return service.create_fund(conn, name=body.name, donor_words=body.donor_words, policy=body.policy.as_policy())
+
     @app.get("/api/funds/{code}")
     def get_fund(code: str, conn: sqlite3.Connection = Depends(db)):
         return service.fund_summary(conn, code)
@@ -108,6 +142,15 @@ def create_app(settings: Settings | None = None, paypal: Any = None, conn: sqlit
     @app.post("/api/limits/parse")
     def parse_limits(body: LimitsIn, conn: sqlite3.Connection = Depends(db)):
         return service.parse_limits(conn, llm, body.donor_words)
+
+    @app.get("/api/limits/categories")
+    def limit_categories():
+        return service.categories()
+
+    @app.post("/api/limits/preview")
+    def preview_limits(body: PolicyIn, conn: sqlite3.Connection = Depends(db)):
+        receipts = [(p.stem, p.read_bytes()) for p in sorted((DEMO_DIR / "receipts").glob("*.jpg"))]
+        return service.preview_policy(conn, llm, body.as_policy(), receipts)
 
     @app.post("/api/requests", status_code=201)
     def create_request(fund_code: str = Form(...), partner_id: str = Form(...),

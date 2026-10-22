@@ -58,6 +58,45 @@ export interface DemoReceipt {
   url: string
 }
 
+export interface Policy {
+  region: string | null
+  allowed: string[]
+  never: string[]
+  beneficiaries: string | null
+  until: string | null // YYYY-MM-DD
+}
+
+export interface ParsedLimits {
+  policy: Policy
+  rules: { kind: string; value: string }[]
+  model: string
+  cached: boolean
+  seconds: number
+}
+
+export interface Categories {
+  categories: { key: string; label: string }[]
+  always_never: string[]
+}
+
+export interface PreviewRow {
+  name: string
+  shop: string
+  region: string
+  lines: number
+  fits: number
+  requested_cents: number
+  payable_cents: number
+  blocked: { label: string; reason: string }[]
+  flags: { kind: string; severity: string; message: string }[]
+}
+
+export const parseLimits = (donorWords: string) => call<ParsedLimits>('POST', '/api/limits/parse', { donor_words: donorWords })
+export const getCategories = () => call<Categories>('GET', '/api/limits/categories')
+export const previewPolicy = (policy: Policy) => call<PreviewRow[]>('POST', '/api/limits/preview', policy)
+export const listFunds = () => call<{ code: string; name: string }[]>('GET', '/api/funds')
+export const createFund = (body: { name: string; donor_words: string; policy: Policy }) => call<FundSummary>('POST', '/api/funds', body)
+
 export const getRequest = (id: string) => call<RequestDetail>('GET', `/api/requests/${id}`)
 export const getFund = (code: string) => call<FundSummary>('GET', `/api/funds/${code}`)
 export const listDemoReceipts = () => call<DemoReceipt[]>('GET', '/api/demo/receipts')

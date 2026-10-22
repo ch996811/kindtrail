@@ -1,15 +1,15 @@
 import { useQuery, useQueryClient } from '@tanstack/react-query'
 import { motion } from 'motion/react'
 import { useEffect, useRef, useState, type ChangeEvent, type DragEvent } from 'react'
-import { Link } from 'react-router'
+import { Link, useSearchParams } from 'react-router'
 import { ApiError, getFund, listDemoReceipts, submitReceipt, toReviewModel, type RequestDetail } from '../api'
 import { BoxedPhoto } from '../components/BoxedPhoto'
 import { ReviewPanel } from '../components/ReviewPanel'
 import { TopBar } from '../components/TopBar'
 import { Trail } from '../components/Trail'
 
-// The demo is signed in as one field partner sending to one fund.
-const FUND_CODE = 'FUND-HUALIEN-KIDS'
+// The demo is signed in as one field partner; the fund comes from ?fund= (default: the Hualien kids fund).
+const DEFAULT_FUND = 'FUND-HUALIEN-KIDS'
 const PARTNER = { id: 'hualien-mountain-kitchen', name: 'Hualien Mountain Kitchen' }
 const MAX_BYTES = 6 * 1024 * 1024
 const TYPES = ['image/jpeg', 'image/png', 'image/webp']
@@ -23,11 +23,13 @@ type Phase = { name: 'choose' } | { name: 'reading'; started: number } | { name:
 
 export function SubmitReceipt() {
   const qc = useQueryClient()
-  const fund = useQuery({ queryKey: ['fund', FUND_CODE], queryFn: () => getFund(FUND_CODE) })
+  const [params] = useSearchParams()
+  const fundCode = params.get('fund') ?? DEFAULT_FUND
+  const fund = useQuery({ queryKey: ['fund', fundCode], queryFn: () => getFund(fundCode) })
   const demos = useQuery({ queryKey: ['demo-receipts'], queryFn: listDemoReceipts })
   const [photo, setPhoto] = useState<File | null>(null)
   const [preview, setPreview] = useState<string | null>(null)
-  const [purpose, setPurpose] = useState('relief supplies for typhoon families')
+  const [purpose, setPurpose] = useState('relief supplies')
   const [phase, setPhase] = useState<Phase>({ name: 'choose' })
   const [activeItem, setActiveItem] = useState<string | null>(null)
   const [pickError, setPickError] = useState<string | null>(null)
@@ -52,7 +54,7 @@ export function SubmitReceipt() {
     if (!photo) return
     setPhase({ name: 'reading', started: performance.now() })
     try {
-      const result = await submitReceipt({ fundCode: FUND_CODE, partnerId: PARTNER.id, purpose, photo })
+      const result = await submitReceipt({ fundCode, partnerId: PARTNER.id, purpose, photo })
       qc.setQueryData(['request', result.id], result) // the review desk opens instantly
       setPhase({ name: 'done', result })
     } catch (e) {

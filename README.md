@@ -32,6 +32,8 @@ The model reads; plain Python decides.
 3. **Rule engine.** Deterministic code (`backend/app/review.py`) checks each line against the policy:
    allowed or ruled-out category, shop region, purchase date, a resubmitted receipt, and arithmetic that
    doesn't add up. Cash equivalents and alcohol are never paid from restricted gifts.
+   Donors see the policy before it is saved, can add or remove uses, and get a live preview of how
+   it would judge receipts the AI has already read.
 4. **Reviewer.** A person sees the photo with every line boxed green or red, the reason for each
    verdict, and approves the payout.
 
@@ -81,6 +83,9 @@ transaction search), run `python backend/scripts/sandbox_smoke.py`.
 | POST | `/api/gifts/{order_id}/capture` | Capture an approved order and add the gift to the fund |
 | GET | `/api/funds/{code}` | Fund balance and every gift's spent / left amounts |
 | POST | `/api/limits/parse` | Turn a donor's plain-language limits into a structured policy |
+| GET | `/api/limits/categories` | Spending categories, and the ones never paid from restricted gifts |
+| POST | `/api/limits/preview` | Judge receipts the AI has already read against a draft policy (no AI calls) |
+| GET / POST | `/api/funds` | List funds / open a fund from a donor's words and the checked policy |
 | POST | `/api/requests` | Upload a receipt photo; the AI reads it and the rule engine judges every line |
 | GET | `/api/requests/{id}/receipt` | The receipt photo |
 | GET | `/api/requests/{id}` | A spending request with its line verdicts and which gifts would pay for it |

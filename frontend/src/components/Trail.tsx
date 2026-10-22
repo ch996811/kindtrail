@@ -40,6 +40,8 @@ export function Trail({ stops, current }: { stops: TrailStop[]; current: number 
   useLayoutEffect(() => {
     const el = wrapRef.current
     if (!el) return
+    // Measure now so the first paint is right; ResizeObserver only reports once the tab renders.
+    setWidth(Math.max(320, el.getBoundingClientRect().width))
     const ro = new ResizeObserver(([entry]) => setWidth(Math.max(320, entry.contentRect.width)))
     ro.observe(el)
     return () => ro.disconnect()

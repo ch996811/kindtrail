@@ -91,12 +91,19 @@ class LLM:
     provider: Provider
     daily_cap: int = 300
 
+    def lookup(self, conn: sqlite3.Connection, *, task: str, prompt: str, schema: dict,
+               image: bytes | None = None) -> Answer | None:
+        """A cached answer, or None. Never calls a model."""
+        row = conn.execute("SELECT response, model FROM llm_cache WHERE key = ?",
+                           (cache_key(task, prompt, schema, image),)).fetchone()
+        return Answer(json.loads(row["response"]), row["model"], cached=True) if row else None
+
     def ask(self, conn: sqlite3.Connection, *, task: str, prompt: str, schema: dict,
             image: bytes | None = None, mime: str | None = None) -> Answer:
         key = cache_key(task, prompt, schema, image)
-        row = conn.execute("SELECT response, model FROM llm_cache WHERE key = ?", (key,)).fetchone()
-        if row:
-            return Answer(json.loads(row["response"]), row["model"], cached=True)
+        cached = self.lookup(conn, task=task, prompt=prompt, schema=schema, image=image)
+        if cached:
+            return cached
 
         today = datetime.now(timezone.utc).strftime("%Y-%m-%d")
         used = conn.execute("SELECT calls FROM llm_usage WHERE day = ?", (today,)).fetchone()
