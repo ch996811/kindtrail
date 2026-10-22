@@ -52,6 +52,14 @@ class GeminiProvider:
                                   headers={"x-goog-api-key": api_key}, transport=transport)
         self.models = models or DEFAULT_CHAIN
 
+    def warm_up(self) -> None:
+        """Open the connection early. On a fresh Render container the first call took ~25 s
+        (later ones ~3 s); listing models costs no generation quota."""
+        try:
+            self._http.get("/models", params={"pageSize": 1})
+        except httpx.HTTPError:
+            pass
+
     def generate_json(self, *, prompt: str, schema: dict, image: bytes | None, mime: str | None) -> tuple[dict, str]:
         parts: list[dict[str, Any]] = [{"text": prompt}]
         if image is not None:

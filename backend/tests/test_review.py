@@ -136,3 +136,19 @@ def test_gemini_reports_every_model_failure():
                               transport=httpx.MockTransport(lambda r: httpx.Response(429, json={})))
     with pytest.raises(AIUnavailable, match="a: HTTP 429; b: HTTP 429"):
         provider.generate_json(prompt="p", schema={}, image=None, mime=None)
+
+
+def test_warm_up_only_lists_models_and_never_fails():
+    seen = []
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        seen.append((request.method, request.url.path))
+        return httpx.Response(200, json={"models": []})
+
+    GeminiProvider("k", transport=httpx.MockTransport(handler)).warm_up()
+    assert seen == [("GET", "/v1beta/models")]
+
+    def broken(request: httpx.Request) -> httpx.Response:
+        raise httpx.ConnectError("no network")
+
+    GeminiProvider("k", transport=httpx.MockTransport(broken)).warm_up()  # swallowed

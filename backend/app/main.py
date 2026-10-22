@@ -1,5 +1,6 @@
 """Kindtrail API. Run: .venv/Scripts/python -m uvicorn app.main:app --app-dir backend --reload"""
 import sqlite3
+import threading
 from collections.abc import Iterator
 from contextlib import asynccontextmanager
 from datetime import date, datetime, timedelta, timezone
@@ -58,6 +59,16 @@ class FundIn(BaseModel):
     policy: PolicyIn
 
 
+def _warm_up(provider: Any, paypal: Any) -> None:
+    if hasattr(provider, "warm_up"):
+        provider.warm_up()
+    if isinstance(paypal, PayPalClient) and paypal.has_credentials:
+        try:
+            paypal.warm_up()
+        except Exception:  # noqa: BLE001 - best effort; real calls report their own errors
+            pass
+
+
 RECEIPT_TYPES = {"image/jpeg", "image/png", "image/webp"}
 MAX_RECEIPT_BYTES = 6 * 1024 * 1024
 
@@ -75,6 +86,8 @@ def create_app(settings: Settings | None = None, paypal: Any = None, conn: sqlit
             setup.close()
         app.state.paypal = paypal or PayPalClient(settings.paypal_base_url, settings.paypal_client_id,
                                                   settings.paypal_client_secret)
+        # Pay the slow first connections in the background, not on the first visitor's click.
+        threading.Thread(target=_warm_up, args=(llm.provider, app.state.paypal), daemon=True).start()
         yield
 
     app = FastAPI(title="Kindtrail", lifespan=lifespan)

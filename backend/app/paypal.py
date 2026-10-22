@@ -34,6 +34,14 @@ class PayPalClient:
         self._token_expires = 0.0
         self._lock = threading.Lock()
 
+    @property
+    def has_credentials(self) -> bool:
+        return all(self._auth)
+
+    def warm_up(self) -> None:
+        """Fetch the OAuth token early so the first approval doesn't pay for it."""
+        self._access_token()
+
     def _access_token(self) -> str:
         with self._lock:
             if self._token and time.monotonic() < self._token_expires - 60:
