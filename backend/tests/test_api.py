@@ -335,3 +335,20 @@ def test_demo_mode_seeds_gifts_and_reset_lets_the_demo_run_again(conn, fake_payp
         assert again["status"] == "reviewed" and again["payout"] is None
         assert c.get(f"/api/funds/{FUND}").json()["available_cents"] == 9500
         assert c.post("/api/requests/KT-0142/approve").status_code == 200
+
+
+def test_head_requests_on_pages_are_answered(conn, fake_paypal, llm, tmp_path):
+    from fastapi.testclient import TestClient
+
+    from app.config import Settings
+    from app.main import create_app
+
+    dist = tmp_path / "dist"
+    dist.mkdir()
+    (dist / "index.html").write_text("<div id=root></div>")
+    settings = Settings(paypal_env="sandbox", paypal_client_id="x", paypal_client_secret="y", paypal_webhook_id="",
+                        partner_email=PARTNER_EMAIL, llm_provider="replay", gemini_api_key="", llm_daily_cap=5,
+                        demo_mode=False, db_path=":memory:", frontend_dist=str(dist))
+    with TestClient(create_app(settings, paypal=fake_paypal, conn=conn, llm=llm)) as c:
+        assert c.head("/").status_code == 200
+        assert c.head("/give").status_code == 200

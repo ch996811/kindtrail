@@ -9,6 +9,8 @@ thinking); gemma-4-31b-it was also correct and has a much larger free daily quot
 import base64
 import hashlib
 import json
+import logging
+import socket
 import sqlite3
 import time
 from dataclasses import dataclass
@@ -19,6 +21,7 @@ import httpx
 
 from .db import now_iso
 
+log = logging.getLogger("uvicorn.error")  # uvicorn's logger, so lines show up in the server log
 # Model -> extra generationConfig. Gemma ignores thinking settings, so it gets none.
 GEMINI_MODELS: dict[str, dict[str, Any]] = {
     "gemini-3.5-flash-lite": {"thinkingConfig": {"thinkingLevel": "minimal"}},
@@ -46,19 +49,32 @@ class Provider(Protocol):
 class GeminiProvider:
     """Google Gemini API (generativelanguage.googleapis.com), trying each model in order."""
 
+    HOST = "generativelanguage.googleapis.com"
+
     def __init__(self, api_key: str, models: list[str] | None = None, timeout: float = 60.0,
                  transport: httpx.BaseTransport | None = None):
-        self._http = httpx.Client(base_url="https://generativelanguage.googleapis.com/v1beta", timeout=timeout,
+        # Bind to IPv4: a container without working IPv6 can stall on IPv6 attempts before falling back.
+        transport = transport or httpx.HTTPTransport(local_address="0.0.0.0", retries=1)
+        self._http = httpx.Client(base_url=f"https://{self.HOST}/v1beta", timeout=timeout,
                                   headers={"x-goog-api-key": api_key}, transport=transport)
         self.models = models or DEFAULT_CHAIN
 
     def warm_up(self) -> None:
-        """Open the connection early. On a fresh Render container the first call took ~25 s
-        (later ones ~3 s); listing models costs no generation quota."""
+        """Open the connection early and log how long each step takes. On a fresh Render container
+        the first generate call took 25-44 s (later ones ~3 s). Listing models costs no quota."""
+        started = time.monotonic()
         try:
-            self._http.get("/models", params={"pageSize": 1})
-        except httpx.HTTPError:
-            pass
+            families = ",".join(sorted({"v6" if info[0] == socket.AF_INET6 else "v4"
+                                        for info in socket.getaddrinfo(self.HOST, 443, type=socket.SOCK_STREAM)}))
+        except OSError as e:
+            families = f"dns error: {e}"
+        resolved = time.monotonic()
+        try:
+            r = self._http.get("/models", params={"pageSize": 1})
+            log.info("gemini warm-up: dns %.1fs (%s), first request %.1fs, HTTP %s", resolved - started,
+                     families, time.monotonic() - resolved, r.status_code)
+        except httpx.HTTPError as e:
+            log.warning("gemini warm-up failed after %.1fs (%s): %s", time.monotonic() - started, families, e)
 
     def generate_json(self, *, prompt: str, schema: dict, image: bytes | None, mime: str | None) -> tuple[dict, str]:
         parts: list[dict[str, Any]] = [{"text": prompt}]
@@ -71,11 +87,14 @@ class GeminiProvider:
                 "generationConfig": {"responseMimeType": "application/json", "responseJsonSchema": schema,
                                      "temperature": 0, **GEMINI_MODELS.get(model, {})},
             }
+            started = time.monotonic()
             try:
                 r = self._http.post(f"/models/{model}:generateContent", json=body)
             except httpx.HTTPError as e:
+                log.warning("gemini %s failed after %.1fs: %s", model, time.monotonic() - started, e)
                 errors.append(f"{model}: {e}")
                 continue
+            log.info("gemini %s HTTP %s in %.1fs", model, r.status_code, time.monotonic() - started)
             if r.status_code != 200:  # 429 quota, 503 overloaded, ...: try the next model
                 errors.append(f"{model}: HTTP {r.status_code}")
                 continue

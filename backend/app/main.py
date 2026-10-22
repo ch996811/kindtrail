@@ -250,7 +250,7 @@ def create_app(settings: Settings | None = None, paypal: Any = None, conn: sqlit
 
     dist = Path(settings.frontend_dist).resolve()
     if dist.is_dir():
-        @app.get("/{path:path}", include_in_schema=False)
+        @app.api_route("/{path:path}", methods=["GET", "HEAD"], include_in_schema=False)
         def frontend(path: str):
             # Built assets are served as files; any other path is a page of the single-page app.
             if path.startswith("api/"):
