@@ -5,6 +5,7 @@ const NAV = [
   { label: 'Review desk', to: '/' },
   { label: 'Send a receipt', to: '/submit' },
   { label: 'Start a fund', to: '/funds/new' },
+  { label: 'Give', to: '/give' },
 ] as const
 
 export function TopBar({ active }: { active?: (typeof NAV)[number]['label'] }) {

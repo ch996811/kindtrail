@@ -49,6 +49,7 @@ export interface FundSummary {
   donor_words: string
   rules: { kind: string; value: string }[]
   received_cents: number
+  spent_cents: number
   available_cents: number
   gifts: { gift_id: number; donor: string }[]
 }
@@ -123,6 +124,11 @@ export interface GiftImpact {
 }
 
 export const getGiftImpact = (id: string | number) => call<GiftImpact>('GET', `/api/gifts/${id}/impact`)
+export const getConfig = () => call<{ paypal_client_id: string; paypal_env: string }>('GET', '/api/config')
+export const createGift = (body: { fund_code: string; donor_name: string; amount_cents: number }) =>
+  call<{ gift_id: number; order_id: string; approve_url: string | null }>('POST', '/api/gifts', body)
+export const captureGift = (orderId: string) =>
+  call<{ id: number; amount_cents: number; donor_name: string; paypal_capture_id: string; fund_code: string }>('POST', `/api/gifts/${orderId}/capture`)
 
 export const getRequest = (id: string) => call<RequestDetail>('GET', `/api/requests/${id}`)
 export const getFund = (code: string) => call<FundSummary>('GET', `/api/funds/${code}`)

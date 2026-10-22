@@ -118,6 +118,11 @@ def create_app(settings: Settings | None = None, paypal: Any = None, conn: sqlit
     def health() -> dict[str, Any]:
         return {"ok": True, "paypal_env": settings.paypal_env}
 
+    @app.get("/api/config")
+    def public_config() -> dict[str, Any]:
+        # The client id is public by design (the PayPal SDK needs it in the browser); the secret never leaves the server.
+        return {"paypal_client_id": settings.paypal_client_id, "paypal_env": settings.paypal_env}
+
     @app.get("/api/funds")
     def list_funds(conn: sqlite3.Connection = Depends(db)):
         return service.list_funds(conn)

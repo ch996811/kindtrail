@@ -306,3 +306,9 @@ def test_an_unspent_gift_has_no_spends_yet(client):
     body = client.get(f"/api/gifts/{gift['id']}/impact").json()
     assert body["spends"] == [] and body["left_cents"] == 2500
     assert client.get("/api/gifts/9999/impact").status_code == 404
+
+
+def test_public_config_exposes_the_client_id_but_never_the_secret(client):
+    body = client.get("/api/config").json()
+    assert body == {"paypal_client_id": "x", "paypal_env": "sandbox"}
+    assert "y" not in str(body.values())

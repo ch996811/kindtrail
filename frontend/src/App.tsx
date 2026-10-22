@@ -1,6 +1,7 @@
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
 import { MotionConfig } from 'motion/react'
 import { BrowserRouter, Navigate, Route, Routes, useParams } from 'react-router'
+import { Give } from './pages/Give'
 import { ImpactReceipt } from './pages/ImpactReceipt'
 import { ReviewDesk } from './pages/ReviewDesk'
 import { StartFund } from './pages/StartFund'
@@ -26,6 +27,7 @@ export default function App() {
             <Route path="/funds/new" element={<StartFund />} />
             <Route path="/requests/:id/thanks" element={<ThankYous />} />
             <Route path="/gifts/:id" element={<ImpactReceipt />} />
+            <Route path="/give" element={<Give />} />
             <Route path="*" element={<Navigate to="/" replace />} />
           </Routes>
         </BrowserRouter>
