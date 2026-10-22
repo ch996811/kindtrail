@@ -97,6 +97,33 @@ export const previewPolicy = (policy: Policy) => call<PreviewRow[]>('POST', '/ap
 export const listFunds = () => call<{ code: string; name: string }[]>('GET', '/api/funds')
 export const createFund = (body: { name: string; donor_words: string; policy: Policy }) => call<FundSummary>('POST', '/api/funds', body)
 
+export interface GiftImpact {
+  gift: { id: number; donor: string; amount_cents: number; given_at: string; source: 'paypal' | 'seed'; paypal_capture_id: string | null }
+  fund: { code: string; name: string; rules: { kind: string; value: string }[] }
+  used_cents: number
+  left_cents: number
+  spends: {
+    request_id: string
+    status: RequestStatus
+    partner: string
+    purpose: string
+    shop: { name: string; branch: string; printed_at: string; region: string }
+    receipt_url: string | null
+    approved_by: string | null
+    approved_at: string | null
+    paid_at: string | null
+    payout_transaction_id: string | null
+    payable_cents: number
+    your_cents: number
+    items: { key: string; label: string; total_cents: number; yours_cents: number; box: [number, number, number, number] | null }[]
+    donors: { donor: string; cents: number; you: boolean }[]
+    submitted_at: string
+    refused: { label: string; total_cents: number; reason: string }[]
+  }[]
+}
+
+export const getGiftImpact = (id: string | number) => call<GiftImpact>('GET', `/api/gifts/${id}/impact`)
+
 export const getRequest = (id: string) => call<RequestDetail>('GET', `/api/requests/${id}`)
 export const getFund = (code: string) => call<FundSummary>('GET', `/api/funds/${code}`)
 export const listDemoReceipts = () => call<DemoReceipt[]>('GET', '/api/demo/receipts')

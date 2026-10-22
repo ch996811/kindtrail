@@ -17,21 +17,21 @@ FONT_BOLD = "C:/Windows/Fonts/consolab.ttf"
 RECEIPTS = {
     "hualien-home-mart": {
         "header": ["HUALIEN HOME MART", "Ji'an Branch", "No. 88 Zhongshan Rd, Ji'an", "Hualien County"],
-        "meta": ["2026-10-24 14:32   POS 03", "Cashier: Chen"],
+        "meta": ["2026-10-14 14:32   POS 03", "Cashier: Chen"],
         "items": [("Waterproof tarp 3x4m", 4, 8.00), ("Rice 10 kg", 2, 12.00),
                   ("Kids raincoat", 6, 3.60), ("Prepaid gift card", 1, 8.80)],
         "footer": ["Paid: CARD ****4417", "Thank you! Stay safe."],
     },
     "taipei-corner-store": {
         "header": ["CORNER 24 MARKET", "Daan Store", "No. 12 Xinyi Rd Sec 3", "Taipei City"],
-        "meta": ["2026-10-25 21:07   POS 01", "Cashier: Wu"],
+        "meta": ["2026-10-15 21:07   POS 01", "Cashier: Wu"],
         "items": [("Bottled water 6pk", 3, 4.50), ("Instant noodles 5pk", 4, 3.20),
                   ("Beer 6-pack", 2, 9.90), ("Phone top-up card", 1, 15.00)],
         "footer": ["Paid: CASH", "See you again!"],
     },
     "hualien-family-pharmacy": {
         "header": ["FAMILY CARE PHARMACY", "Hualien City", "No. 5 Guolian 1st Rd", "Hualien County"],
-        "meta": ["2026-10-26 10:18   POS 02", "Cashier: Lin"],
+        "meta": ["2026-10-16 10:18   POS 02", "Cashier: Lin"],
         "items": [("Diapers size M 40pc", 3, 11.50), ("Baby formula 800g", 2, 18.90),
                   ("Bandages + antiseptic", 2, 6.40), ("Hand soap 3pk", 2, 4.20)],
         "footer": ["Paid: CARD ****9021", "Get well soon!"],

@@ -135,6 +135,10 @@ def create_app(settings: Settings | None = None, paypal: Any = None, conn: sqlit
         return service.create_gift(conn, pp(request), fund_code=body.fund_code,
                                    donor_name=body.donor_name, amount_cents=body.amount_cents)
 
+    @app.get("/api/gifts/{gift_id}/impact")
+    def gift_impact(gift_id: int, conn: sqlite3.Connection = Depends(db)):
+        return service.gift_impact(conn, gift_id)
+
     @app.post("/api/gifts/{order_id}/capture")
     def capture_gift(order_id: str, request: Request, conn: sqlite3.Connection = Depends(db)):
         return service.capture_gift(conn, pp(request), order_id)

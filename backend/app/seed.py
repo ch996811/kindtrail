@@ -19,7 +19,7 @@ DEMO_DIR = Path(__file__).resolve().parents[1] / "demo"
 
 FUND_CODE = "FUND-HUALIEN-KIDS"
 FUND_NAME = "Hualien Kids Typhoon Fund"
-FUND_CREATED = "2026-10-20"  # anchors "by the end of the year" in the donor's words
+FUND_CREATED = "2026-10-08"  # anchors "by the end of the year" in the donor's words
 DONOR_WORDS = ("Please use my gift only for kids in Hualien who lost their homes in the typhoon. "
                "Not for staff costs. Spend it by the end of the year.")
 FALLBACK_POLICY = {"region": "Hualien County", "allowed": ["shelter", "food", "water", "children_supplies"],
@@ -27,10 +27,10 @@ FALLBACK_POLICY = {"region": "Hualien County", "allowed": ["shelter", "food", "w
 
 PARTNER_ID = "hualien-mountain-kitchen"
 DEMO_REQUEST = {"id": "KT-0142", "receipt": "hualien-home-mart.jpg", "purpose": "typhoon families",
-                "submitted_at": "2026-10-24T06:40:00Z"}
+                "submitted_at": "2026-10-14T06:40:00Z"}
 
-DEMO_GIFTS = [("Mei L.", 5000, "2026-10-21T09:12:00Z"), ("Jordan P.", 2000, "2026-10-22T14:40:00Z"),
-              ("Anonymous", 2500, "2026-10-23T08:05:00Z")]
+DEMO_GIFTS = [("Mei L.", 5000, "2026-10-10T09:12:00Z"), ("Jordan P.", 2000, "2026-10-11T14:40:00Z"),
+              ("Anonymous", 2500, "2026-10-12T08:05:00Z")]
 
 
 def load_demo_cache(conn: sqlite3.Connection) -> int:

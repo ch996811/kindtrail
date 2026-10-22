@@ -275,3 +275,34 @@ def test_parse_limits_with_a_live_model(conn, fake_paypal, tmp_path):
     assert first["policy"]["region"] == "Taitung County" and first["cached"] is False
     assert again["cached"] is True and Model.calls == calls_after_seed + 1
     assert first["rules"][0] == {"kind": "Where", "value": "Taitung County"}
+
+
+# Donor impact receipts -----------------------------------------------------------------------
+
+def test_impact_receipt_says_what_each_gift_bought(client):
+    gifts = [give(client, 5000, "Mei L."), give(client, 2000, "Jordan P."), give(client, 2500, "Anonymous")]
+    client.post("/api/requests/KT-0142/approve")
+    client.post("/api/requests/KT-0142/refresh")
+
+    mei = client.get(f"/api/gifts/{gifts[0]['id']}/impact").json()
+    assert (mei["gift"]["donor"], mei["used_cents"], mei["left_cents"]) == ("Mei L.", 5000, 0)
+    [spend] = mei["spends"]
+    assert spend["request_id"] == "KT-0142" and spend["status"] == "paid"
+    assert spend["payout_transaction_id"] == "TXN-BATCH-1" and spend["paid_at"]
+    assert [(i["label"], i["yours_cents"]) for i in spend["items"]] == [
+        ("4 Waterproof tarp 3x4m", 3200), ("2 Rice 10 kg", 1800), ("6 Kids raincoat", 0)]
+    assert [(d["donor"], d["cents"], d["you"]) for d in spend["donors"]] == [
+        ("Mei L.", 5000, True), ("Jordan P.", 2000, False), ("Anonymous", 760, False)]
+    assert all(i["box"] for i in spend["items"])
+    assert [r["label"] for r in spend["refused"]] == ["1 Prepaid gift card"]
+
+    anon = client.get(f"/api/gifts/{gifts[2]['id']}/impact").json()
+    assert (anon["used_cents"], anon["left_cents"]) == (760, 1740)
+    assert [(i["key"], i["yours_cents"]) for i in anon["spends"][0]["items"] if i["yours_cents"]] == [("line-3", 760)]
+
+
+def test_an_unspent_gift_has_no_spends_yet(client):
+    gift = give(client, 2500)
+    body = client.get(f"/api/gifts/{gift['id']}/impact").json()
+    assert body["spends"] == [] and body["left_cents"] == 2500
+    assert client.get("/api/gifts/9999/impact").status_code == 404

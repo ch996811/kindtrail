@@ -7,7 +7,7 @@ const NAV = [
   { label: 'Start a fund', to: '/funds/new' },
 ] as const
 
-export function TopBar({ active }: { active: (typeof NAV)[number]['label'] }) {
+export function TopBar({ active }: { active?: (typeof NAV)[number]['label'] }) {
   return (
     <div className="mx-auto flex max-w-[1160px] items-center gap-x-6 gap-y-3 px-6 py-[18px] max-md:flex-wrap">
       <Link to="/" className="flex items-baseline gap-2 text-wine no-underline">

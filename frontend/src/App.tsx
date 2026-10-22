@@ -1,9 +1,11 @@
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
 import { MotionConfig } from 'motion/react'
 import { BrowserRouter, Navigate, Route, Routes, useParams } from 'react-router'
+import { ImpactReceipt } from './pages/ImpactReceipt'
 import { ReviewDesk } from './pages/ReviewDesk'
 import { StartFund } from './pages/StartFund'
 import { SubmitReceipt } from './pages/SubmitReceipt'
+import { ThankYous } from './pages/ThankYous'
 
 const queryClient = new QueryClient({ defaultOptions: { queries: { retry: 1, refetchOnWindowFocus: false } } })
 
@@ -22,6 +24,8 @@ export default function App() {
             <Route path="/requests/:id" element={<RequestPage />} />
             <Route path="/submit" element={<SubmitReceipt />} />
             <Route path="/funds/new" element={<StartFund />} />
+            <Route path="/requests/:id/thanks" element={<ThankYous />} />
+            <Route path="/gifts/:id" element={<ImpactReceipt />} />
             <Route path="*" element={<Navigate to="/" replace />} />
           </Routes>
         </BrowserRouter>

@@ -1,4 +1,5 @@
 import { AnimatePresence, motion } from 'motion/react'
+import { Link } from 'react-router'
 import { usd } from '../model'
 
 export type Stage = 'review' | 'paying' | 'paid'
@@ -10,10 +11,11 @@ interface Props {
   notice?: string // an error or a reason approval is blocked
   canApprove: boolean
   onApprove: () => void
+  thanksTo: string // where "Send donor thank-yous" leads once paid
 }
 
 /** Floating decision bar. Approving moves the coin to the "Paid" stop once PayPal confirms. */
-export function ActionBar({ partner, amount, stage, notice, canApprove, onApprove }: Props) {
+export function ActionBar({ partner, amount, stage, notice, canApprove, onApprove, thanksTo }: Props) {
   const message =
     notice ?? (stage === 'paid' ? `${usd(amount)} sent to ${partner} through PayPal Payouts` : `Pays ${partner} via PayPal Payouts`)
   return (
@@ -45,9 +47,9 @@ export function ActionBar({ partner, amount, stage, notice, canApprove, onApprov
           </button>
         </>
       ) : (
-        <button type="button" className="rounded-[14px] bg-white px-[18px] py-3 font-bold text-wine max-sm:flex-1">
+        <Link to={thanksTo} className="rounded-[14px] bg-white px-[18px] py-3 text-center font-bold text-wine no-underline max-sm:flex-1">
           Send donor thank-yous
-        </button>
+        </Link>
       )}
     </div>
   )

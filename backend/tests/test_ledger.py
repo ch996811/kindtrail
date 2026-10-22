@@ -50,3 +50,11 @@ def test_reconcile_flags_lag_mismatch_and_unknown_paypal_rows():
     assert [r["ref"] for r in result["ours_only"]] == ["gift-2"]
     assert [(r["ref"], r["paypal_cents"]) for r in result["mismatched"]] == [("gift-3", 900)]
     assert [r["transaction_id"] for r in result["paypal_only"]] == ["OTHER"]
+
+
+def test_split_by_item_walks_gifts_and_lines_in_order():
+    from app.ledger import split_by_item
+
+    segments = split_by_item([(1, 5000), (2, 2000), (3, 760)], [("tarp", 3200), ("rice", 2400), ("coat", 2160)])
+    assert segments == [(1, "tarp", 3200), (1, "rice", 1800), (2, "rice", 600), (2, "coat", 1400), (3, "coat", 760)]
+    assert sum(c for _, _, c in segments) == 7760

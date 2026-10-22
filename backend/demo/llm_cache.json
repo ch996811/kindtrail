@@ -1,6 +1,6 @@
 [
  {
-  "key": "611d730dc7f628f0fa1d1e9f1a0d962ef95585ecc39fc75372e92d80a8e2919d",
+  "key": "4082b45a7d510ad6e5d17f79813c8135c53dc4845681961a3faada3469ebd30e",
   "task": "limits",
   "model": "gemini-3.5-flash-lite",
   "response": {
@@ -19,7 +19,157 @@
   }
  },
  {
-  "key": "29b8d52f4ea8898cfbd79ac6e148d46c4bb070a96b466ede88820d4bf680cc22",
+  "key": "600c3498e887ce0d3d21ebfd19aefb221a86108d8c1670c6b373c164e09c981b",
+  "task": "receipt",
+  "model": "gemini-3.5-flash-lite",
+  "response": {
+   "readable": true,
+   "shop": {
+    "name": "FAMILY CARE PHARMACY",
+    "branch": "Hualien City",
+    "address": "No. 5 Guolian 1st Rd",
+    "region": "Hualien County",
+    "printed_at": "2026-10-16 10:18"
+   },
+   "currency": "USD",
+   "total": 93.5,
+   "items": [
+    {
+     "receipt_text": "Diapers size M 40pc",
+     "label": "3 packs of Diapers size M 40pc",
+     "qty": 3,
+     "unit_price": 11.5,
+     "line_total": 34.5,
+     "category": "children_supplies",
+     "box_2d": [
+      392,
+      203,
+      467,
+      707
+     ]
+    },
+    {
+     "receipt_text": "Baby formula 800g",
+     "label": "2 units of Baby formula 800g",
+     "qty": 2,
+     "unit_price": 18.9,
+     "line_total": 37.8,
+     "category": "children_supplies",
+     "box_2d": [
+      459,
+      201,
+      536,
+      704
+     ]
+    },
+    {
+     "receipt_text": "Bandages + antiseptic",
+     "label": "2 units of Bandages + antiseptic",
+     "qty": 2,
+     "unit_price": 6.4,
+     "line_total": 12.8,
+     "category": "medical",
+     "box_2d": [
+      525,
+      194,
+      604,
+      700
+     ]
+    },
+    {
+     "receipt_text": "Hand soap 3pk",
+     "label": "2 packs of Hand soap 3pk",
+     "qty": 2,
+     "unit_price": 4.2,
+     "line_total": 8.4,
+     "category": "hygiene",
+     "box_2d": [
+      594,
+      189,
+      670,
+      696
+     ]
+    }
+   ]
+  }
+ },
+ {
+  "key": "726039c639c8030e455ff5a3db4493bbc45a93b0c876b925629b762a7985b40e",
+  "task": "receipt",
+  "model": "gemini-3.5-flash-lite",
+  "response": {
+   "readable": true,
+   "shop": {
+    "name": "HUALIEN HOME MART",
+    "branch": "Ji'an Branch",
+    "address": "No. 88 Zhongshan Rd, Ji'an",
+    "region": "Hualien County",
+    "printed_at": "2026-10-14 14:32"
+   },
+   "currency": "USD",
+   "total": 86.4,
+   "items": [
+    {
+     "receipt_text": "Waterproof tarp 3x4m",
+     "label": "4 Waterproof tarp 3x4m",
+     "qty": 4,
+     "unit_price": 8.0,
+     "line_total": 32.0,
+     "category": "shelter",
+     "box_2d": [
+      410,
+      196,
+      464,
+      695
+     ]
+    },
+    {
+     "receipt_text": "Rice 10 kg",
+     "label": "2 Rice 10 kg",
+     "qty": 2,
+     "unit_price": 12.0,
+     "line_total": 24.0,
+     "category": "food",
+     "box_2d": [
+      479,
+      203,
+      532,
+      697
+     ]
+    },
+    {
+     "receipt_text": "Kids raincoat",
+     "label": "6 Kids raincoat",
+     "qty": 6,
+     "unit_price": 3.6,
+     "line_total": 21.6,
+     "category": "children_supplies",
+     "box_2d": [
+      546,
+      204,
+      599,
+      699
+     ]
+    },
+    {
+     "receipt_text": "Prepaid gift card",
+     "label": "1 Prepaid gift card",
+     "qty": 1,
+     "unit_price": 8.8,
+     "line_total": 8.8,
+     "category": "cash_equivalent",
+     "box_2d": [
+      611,
+      207,
+      665,
+      703
+     ]
+    }
+   ]
+  }
+ },
+ {
+  "key": "8c38e73b2396697cbff936eafa7770b6cde2c36168bb7b54d64d9adc23705207",
   "task": "receipt",
   "model": "gemini-3.5-flash-lite",
   "response": {
@@ -29,7 +179,7 @@
     "branch": "Daan Store",
     "address": "No. 12 Xinyi Rd Sec 3",
     "region": "Taipei City",
-    "printed_at": "2026-10-25 21:07"
+    "printed_at": "2026-10-15 21:07"
    },
    "currency": "USD",
    "total": 61.1,
@@ -43,8 +193,8 @@
      "category": "water",
      "box_2d": [
       410,
-      201,
-      461,
+      203,
+      463,
       696
      ]
     },
@@ -58,7 +208,7 @@
      "box_2d": [
       476,
       203,
-      528,
+      529,
       699
      ]
     },
@@ -71,9 +221,9 @@
      "category": "alcohol_tobacco",
      "box_2d": [
       542,
-      204,
+      203,
       595,
-      699
+      700
      ]
     },
     {
@@ -84,160 +234,10 @@
      "line_total": 15.0,
      "category": "cash_equivalent",
      "box_2d": [
-      611,
-      207,
+      609,
+      203,
       663,
       700
-     ]
-    }
-   ]
-  }
- },
- {
-  "key": "af5069082882b5e7418fe31c79a279cdc18b95ae185dbac54ac8a5f5ff730a6b",
-  "task": "receipt",
-  "model": "gemini-3.5-flash-lite",
-  "response": {
-   "readable": true,
-   "shop": {
-    "name": "HUALIEN HOME MART",
-    "branch": "Ji'an Branch",
-    "address": "No. 88 Zhongshan Rd, Ji'an",
-    "region": "Hualien County",
-    "printed_at": "2026-10-24 14:32"
-   },
-   "currency": "USD",
-   "total": 86.4,
-   "items": [
-    {
-     "receipt_text": "Waterproof tarp 3x4m",
-     "label": "4 Waterproof tarps 3x4m",
-     "qty": 4,
-     "unit_price": 8.0,
-     "line_total": 32.0,
-     "category": "shelter",
-     "box_2d": [
-      410,
-      196,
-      467,
-      696
-     ]
-    },
-    {
-     "receipt_text": "Rice 10 kg",
-     "label": "2 Rice 10 kg",
-     "qty": 2,
-     "unit_price": 12.0,
-     "line_total": 24.0,
-     "category": "food",
-     "box_2d": [
-      480,
-      203,
-      532,
-      699
-     ]
-    },
-    {
-     "receipt_text": "Kids raincoat",
-     "label": "6 Kids raincoats",
-     "qty": 6,
-     "unit_price": 3.6,
-     "line_total": 21.6,
-     "category": "children_supplies",
-     "box_2d": [
-      546,
-      206,
-      600,
-      701
-     ]
-    },
-    {
-     "receipt_text": "Prepaid gift card",
-     "label": "1 Prepaid gift card",
-     "qty": 1,
-     "unit_price": 8.8,
-     "line_total": 8.8,
-     "category": "cash_equivalent",
-     "box_2d": [
-      611,
-      208,
-      666,
-      704
-     ]
-    }
-   ]
-  }
- },
- {
-  "key": "e32839bfcdb635d302f1aa7cfb19ef024a94dc86cec937765d2c233a3350ebc7",
-  "task": "receipt",
-  "model": "gemini-3.5-flash-lite",
-  "response": {
-   "readable": true,
-   "shop": {
-    "name": "FAMILY CARE PHARMACY",
-    "branch": "POS 02",
-    "address": "No. 5 Guolian 1st Rd",
-    "region": "Hualien County",
-    "printed_at": "2026-10-26 10:18"
-   },
-   "currency": "USD",
-   "total": 93.5,
-   "items": [
-    {
-     "receipt_text": "Diapers size M 40pc",
-     "label": "3 packs of Diapers size M 40pc",
-     "qty": 3,
-     "unit_price": 11.5,
-     "line_total": 34.5,
-     "category": "children_supplies",
-     "box_2d": [
-      396,
-      209,
-      456,
-      700
-     ]
-    },
-    {
-     "receipt_text": "Baby formula 800g",
-     "label": "2 units of Baby formula 800g",
-     "qty": 2,
-     "unit_price": 18.9,
-     "line_total": 37.8,
-     "category": "children_supplies",
-     "box_2d": [
-      463,
-      205,
-      532,
-      695
-     ]
-    },
-    {
-     "receipt_text": "Bandages + antiseptic",
-     "label": "2 units of Bandages + antiseptic",
-     "qty": 2,
-     "unit_price": 6.4,
-     "line_total": 12.8,
-     "category": "medical",
-     "box_2d": [
-      530,
-      200,
-      600,
-      690
-     ]
-    },
-    {
-     "receipt_text": "Hand soap 3pk",
-     "label": "2 packs of Hand soap 3pk",
-     "qty": 2,
-     "unit_price": 4.2,
-     "line_total": 8.4,
-     "category": "hygiene",
-     "box_2d": [
-      597,
-      195,
-      668,
-      685
      ]
     }
    ]

@@ -100,6 +100,7 @@ export function ReviewDesk({ requestId }: { requestId: string }) {
         notice={notice}
         canApprove={data.shortfall_cents === 0 && data.payable_cents > 0}
         onApprove={() => approve.mutate()}
+        thanksTo={`/requests/${requestId}/thanks`}
       />
     </>
   )

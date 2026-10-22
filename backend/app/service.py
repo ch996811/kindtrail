@@ -285,6 +285,70 @@ def receipt_image(conn: sqlite3.Connection, request_id: str) -> tuple[bytes, str
     return row["bytes"], row["mime"]
 
 
+# Donor impact ------------------------------------------------------------------------------
+
+def gift_impact(conn: sqlite3.Connection, gift_id: int) -> dict[str, Any]:
+    """Everything one gift paid for, line by line, with the PayPal payout that proves it."""
+    gift = conn.execute(
+        "SELECT g.*, f.name AS fund_name, f.policy_json, f.rules_json FROM gifts g JOIN funds f ON f.code = g.fund_code "
+        "WHERE g.id = ? AND g.status = 'captured'", (gift_id,)).fetchone()
+    if gift is None:
+        raise NotFound(f"no gift {gift_id}")
+
+    spends = []
+    request_ids = [r[0] for r in conn.execute(
+        "SELECT request_id FROM allocations WHERE gift_id = ? GROUP BY request_id ORDER BY MIN(id)", (gift_id,))]
+    for request_id in request_ids:
+        req, items = _load_request(conn, request_id)
+        allocs = conn.execute("SELECT gift_id, amount_cents FROM allocations WHERE request_id = ? ORDER BY id",
+                              (request_id,)).fetchall()
+        fitting = [i for i in items if i["verdict"] == "fits"]
+        mine: dict[str, int] = {}
+        for gid, key, cents in ledger.split_by_item([(a["gift_id"], a["amount_cents"]) for a in allocs],
+                                                    [(i["item_key"], ledger.item_total_cents(i)) for i in fitting]):
+            if gid == gift_id:
+                mine[key] = mine.get(key, 0) + cents
+        donors = conn.execute(
+            "SELECT a.gift_id, g.donor_name, SUM(a.amount_cents) AS cents FROM allocations a JOIN gifts g ON g.id = a.gift_id "
+            "WHERE a.request_id = ? GROUP BY a.gift_id ORDER BY MIN(a.id)", (request_id,)).fetchall()
+        partner = conn.execute("SELECT name FROM partners WHERE id = ?", (req["partner_id"],)).fetchone()
+        payout = conn.execute("SELECT * FROM payouts WHERE request_id = ?", (request_id,)).fetchone()
+        spends.append({
+            "request_id": request_id,
+            "status": req["status"],
+            "partner": partner["name"],
+            "purpose": req["purpose"],
+            "shop": json.loads(req["shop_json"]),
+            "receipt_url": f"/api/requests/{request_id}/receipt" if req["receipt_sha"] else None,
+            "approved_by": req["approved_by"],
+            "approved_at": req["approved_at"],
+            "paid_at": payout["updated_at"] if payout and payout["status"] == "SUCCESS" else None,
+            "payout_transaction_id": payout["transaction_id"] if payout else None,
+            "payable_cents": sum(ledger.item_total_cents(i) for i in fitting),
+            "your_cents": sum(a["amount_cents"] for a in allocs if a["gift_id"] == gift_id),
+            "items": [{"key": i["item_key"], "label": i["label"], "total_cents": ledger.item_total_cents(i),
+                       "yours_cents": mine.get(i["item_key"], 0),
+                       "box": json.loads(i["box_json"]) if i["box_json"] else None} for i in fitting],
+            "donors": [{"donor": d["donor_name"], "cents": d["cents"], "you": d["gift_id"] == gift_id} for d in donors],
+            "submitted_at": req["submitted_at"],
+            # Lines the rules refused: the partner had to pay those without donors' money.
+            "refused": [{"label": i["label"], "total_cents": ledger.item_total_cents(i), "reason": i["reason"]}
+                        for i in items if i["verdict"] != "fits"],
+        })
+
+    used = sum(s["your_cents"] for s in spends)
+    rules = review.policy_chips(json.loads(gift["policy_json"])) if gift["policy_json"] else json.loads(gift["rules_json"])
+    return {
+        "gift": {"id": gift["id"], "donor": gift["donor_name"], "amount_cents": gift["amount_cents"],
+                 "given_at": gift["captured_at"], "source": gift["source"],
+                 "paypal_capture_id": gift["paypal_capture_id"]},
+        "fund": {"code": gift["fund_code"], "name": gift["fund_name"], "rules": rules},
+        "used_cents": used,
+        "left_cents": gift["amount_cents"] - used,
+        "spends": spends,
+    }
+
+
 # Webhooks ---------------------------------------------------------------------------------
 
 def handle_webhook(conn: sqlite3.Connection, event: dict[str, Any], verified: bool) -> str:

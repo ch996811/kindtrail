@@ -70,6 +70,27 @@ def request_amounts(items: list[sqlite3.Row]) -> tuple[int, int]:
     return requested, payable
 
 
+def split_by_item(allocations: list[tuple[int, int]], items: list[tuple[str, int]]) -> list[tuple[int, str, int]]:
+    """Which gift paid for which line, walking both in order (gifts oldest first, lines as printed).
+
+    allocations: [(gift_id, cents)] for one request; items: [(item_key, cents)] of the lines that fit.
+    Returns [(gift_id, item_key, cents)] segments. Totals must match; that's what approval guarantees.
+    """
+    segments: list[tuple[int, str, int]] = []
+    queue = [[key, cents] for key, cents in items if cents > 0]
+    i = 0
+    for gift_id, cents in allocations:
+        left = cents
+        while left > 0 and i < len(queue):
+            take = min(left, queue[i][1])
+            segments.append((gift_id, queue[i][0], take))
+            left -= take
+            queue[i][1] -= take
+            if queue[i][1] == 0:
+                i += 1
+    return segments
+
+
 # Reconciliation ----------------------------------------------------------------------------
 
 def reconcile(gifts: list[dict[str, Any]], payouts: list[dict[str, Any]],
