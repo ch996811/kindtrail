@@ -1,4 +1,5 @@
 """Kindtrail API. Run: .venv/Scripts/python -m uvicorn app.main:app --app-dir backend --reload"""
+import logging
 import sqlite3
 import threading
 from collections.abc import Iterator
@@ -17,6 +18,8 @@ from .db import connect
 from .llm import AIUnavailable, LLM, make_llm
 from .paypal import PayPalClient, PayPalError
 from .seed import DEMO_DIR, reset_demo, seed
+
+log = logging.getLogger("uvicorn.error")
 
 
 class GiftIn(BaseModel):
@@ -244,9 +247,12 @@ def create_app(settings: Settings | None = None, paypal: Any = None, conn: sqlit
             try:
                 verified = pp(request).verify_webhook(webhook_id=settings.paypal_webhook_id,
                                                       headers=dict(request.headers), event=event)
-            except PayPalError:
+            except PayPalError as e:
+                log.warning("webhook verification call failed: %s", e)
                 verified = False
-        return {"result": service.handle_webhook(conn, event, verified)}
+        result = service.handle_webhook(conn, event, verified)
+        log.info("paypal webhook %s %s verified=%s -> %s", event.get("event_type"), event.get("id"), verified, result)
+        return {"result": result}
 
     dist = Path(settings.frontend_dist).resolve()
     if dist.is_dir():
