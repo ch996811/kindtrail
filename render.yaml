@@ -25,5 +25,6 @@ services:
         sync: false
       - key: GEMINI_API_KEY
         sync: false
+      # Not a secret: it only names the PayPal webhook whose signatures we verify (verifying still needs the secret).
       - key: PAYPAL_WEBHOOK_ID
-        sync: false
+        value: 97551323PB391514E
