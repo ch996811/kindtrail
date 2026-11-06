@@ -88,7 +88,7 @@ export function Give() {
   return (
     <>
       <header className="rounded-b-[36px] bg-band pb-[34px]">
-        <TopBar active="Give" />
+        <TopBar active="Give" role="donor" />
         <div className="mx-auto max-w-[1160px] px-6 pt-[18px]">
           <h1 className="font-display m-0 max-w-[22ch] text-[clamp(30px,4.4vw,52px)] leading-[1.06] font-extrabold">
             Give to the {fund.data?.name ?? 'fund'}

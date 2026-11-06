@@ -82,7 +82,7 @@ export function SubmitReceipt() {
   return (
     <>
       <header className="rounded-b-[36px] bg-band pb-[34px]">
-        <TopBar active="Send a receipt" />
+        <TopBar active="Send a receipt" role="partner" />
         <div className="mx-auto max-w-[1160px] px-6 pt-[18px]">
           <h1 className="font-display m-0 max-w-[22ch] text-[clamp(30px,4.4vw,52px)] leading-[1.06] font-extrabold">
             Send a receipt to the {fund.data?.name ?? 'fund'}

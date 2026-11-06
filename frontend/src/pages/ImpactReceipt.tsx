@@ -33,7 +33,7 @@ export function ImpactReceipt() {
   if (q.isPending || q.error) {
     return (
       <header className="rounded-b-[36px] bg-band pb-10">
-        <TopBar />
+        <TopBar role="donor" />
         <p className="mx-auto max-w-[1160px] px-6 pt-6 text-lg" role={q.error ? 'alert' : 'status'}>
           {q.error ? `Couldn't load this gift: ${q.error.message}` : 'Loading your receipt...'}
         </p>
@@ -55,7 +55,7 @@ export function ImpactReceipt() {
   return (
     <>
       <header className="rounded-b-[36px] bg-band pb-[34px]">
-        <TopBar />
+        <TopBar role="donor" />
         <div className="mx-auto max-w-[1160px] px-6 pt-[18px]">
           <h1 className="font-display m-0 max-w-[20ch] text-[clamp(30px,4.4vw,52px)] leading-[1.06] font-extrabold">
             {first ? `${first}, here’s` : 'Here’s'} what your {usd(d.gift.amount_cents / 100)} did

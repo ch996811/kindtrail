@@ -4,6 +4,8 @@ import { lazy, Suspense } from 'react'
 import { BrowserRouter, Navigate, Route, Routes, useParams } from 'react-router'
 
 // Each page is its own chunk, so the first visit only downloads the page it lands on.
+const Home = lazy(() => import('./pages/Home').then((m) => ({ default: m.Home })))
+const Requests = lazy(() => import('./pages/Requests').then((m) => ({ default: m.Requests })))
 const ReviewDesk = lazy(() => import('./pages/ReviewDesk').then((m) => ({ default: m.ReviewDesk })))
 const SubmitReceipt = lazy(() => import('./pages/SubmitReceipt').then((m) => ({ default: m.SubmitReceipt })))
 const StartFund = lazy(() => import('./pages/StartFund').then((m) => ({ default: m.StartFund })))
@@ -25,7 +27,8 @@ export default function App() {
         <BrowserRouter>
           <Suspense fallback={<div className="min-h-[340px] rounded-b-[36px] bg-band" aria-busy="true" />}>
             <Routes>
-              <Route path="/" element={<ReviewDesk requestId="KT-0142" />} />
+              <Route path="/" element={<Home />} />
+              <Route path="/requests" element={<Requests />} />
               <Route path="/requests/:id" element={<RequestPage />} />
               <Route path="/submit" element={<SubmitReceipt />} />
               <Route path="/funds/new" element={<StartFund />} />

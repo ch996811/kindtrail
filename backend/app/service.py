@@ -407,6 +407,24 @@ def list_funds(conn: sqlite3.Connection) -> list[dict[str, Any]]:
     return [{"code": f["code"], "name": f["name"]} for f in conn.execute("SELECT code, name FROM funds ORDER BY rowid")]
 
 
+def list_requests(conn: sqlite3.Connection) -> list[dict[str, Any]]:
+    """Every spending request, waiting ones first, newest first within each status."""
+    out = []
+    for r in conn.execute(
+            "SELECT q.*, p.name AS partner_name, f.name AS fund_name FROM requests q "
+            "JOIN partners p ON p.id = q.partner_id JOIN funds f ON f.code = q.fund_code "
+            "ORDER BY CASE q.status WHEN 'reviewed' THEN 0 WHEN 'paying' THEN 1 ELSE 2 END, q.submitted_at DESC"):
+        items = conn.execute("SELECT * FROM request_items WHERE request_id = ?", (r["id"],)).fetchall()
+        requested, payable = ledger.request_amounts(items)
+        flags = json.loads(r["review_json"]).get("flags", []) if r["review_json"] else []
+        out.append({"id": r["id"], "status": r["status"], "partner": r["partner_name"], "fund": r["fund_name"],
+                    "purpose": r["purpose"], "submitted_at": r["submitted_at"], "requested_cents": requested,
+                    "payable_cents": payable, "lines": len(items),
+                    "fits": sum(1 for i in items if i["verdict"] == "fits"),
+                    "flags": [f["message"] for f in flags]})
+    return out
+
+
 def _fund_code(conn: sqlite3.Connection, name: str) -> str:
     """FUND-<NAME-IN-CAPS>, made unique. It travels to PayPal in purchase_units.custom_id."""
     slug = "".join(c if c.isascii() and c.isalnum() else "-" for c in name.upper())

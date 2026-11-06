@@ -51,7 +51,7 @@ export interface FundSummary {
   received_cents: number
   spent_cents: number
   available_cents: number
-  gifts: { gift_id: number; donor: string }[]
+  gifts: { gift_id: number; donor: string; given_cents: number; used_cents: number; left_cents: number }[]
 }
 
 export interface DemoReceipt {
@@ -131,6 +131,21 @@ export const createGift = (body: { fund_code: string; donor_name: string; amount
 export const captureGift = (orderId: string) =>
   call<{ id: number; amount_cents: number; donor_name: string; paypal_capture_id: string; fund_code: string }>('POST', `/api/gifts/${orderId}/capture`)
 
+export interface RequestSummary {
+  id: string
+  status: RequestStatus
+  partner: string
+  fund: string
+  purpose: string
+  submitted_at: string
+  requested_cents: number
+  payable_cents: number
+  lines: number
+  fits: number
+  flags: string[]
+}
+
+export const listRequests = () => call<RequestSummary[]>('GET', '/api/requests')
 export const getRequest = (id: string) => call<RequestDetail>('GET', `/api/requests/${id}`)
 export const getFund = (code: string) => call<FundSummary>('GET', `/api/funds/${code}`)
 export const listDemoReceipts = () => call<DemoReceipt[]>('GET', '/api/demo/receipts')

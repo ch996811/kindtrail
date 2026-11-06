@@ -213,6 +213,10 @@ def create_app(settings: Settings | None = None, paypal: Any = None, conn: sqlit
         data, mime = service.receipt_image(conn, request_id)
         return Response(data, media_type=mime, headers={"Cache-Control": "public, max-age=86400"})
 
+    @app.get("/api/requests")
+    def list_requests(conn: sqlite3.Connection = Depends(db)):
+        return service.list_requests(conn)
+
     @app.get("/api/requests/{request_id}")
     def get_request(request_id: str, conn: sqlite3.Connection = Depends(db)):
         return service.request_detail(conn, request_id)

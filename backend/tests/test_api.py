@@ -352,3 +352,13 @@ def test_head_requests_on_pages_are_answered(conn, fake_paypal, llm, tmp_path):
     with TestClient(create_app(settings, paypal=fake_paypal, conn=conn, llm=llm)) as c:
         assert c.head("/").status_code == 200
         assert c.head("/give").status_code == 200
+
+
+def test_request_list_puts_waiting_requests_first(client):
+    give(client, 8000)
+    upload(client, DEMO / "taipei-corner-store.jpg")
+    client.post("/api/requests/KT-0142/approve")
+    rows = client.get("/api/requests").json()
+    assert [(r["id"], r["status"]) for r in rows] == [("KT-0143", "reviewed"), ("KT-0142", "paying")]
+    assert rows[0]["fits"] == 0 and rows[0]["lines"] == 4 and rows[0]["flags"][0].startswith("Bought in Taipei")
+    assert (rows[1]["requested_cents"], rows[1]["payable_cents"], rows[1]["partner"]) == (8640, 7760, "Hualien Mountain Kitchen")

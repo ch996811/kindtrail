@@ -26,7 +26,7 @@ export function ThankYous() {
   return (
     <>
       <header className="rounded-b-[36px] bg-band pb-[34px]">
-        <TopBar active="Review desk" />
+        <TopBar active="Review desk" role="charity" />
         <div className="mx-auto max-w-[1160px] px-6 pt-[18px]">
           <h1 className="font-display m-0 max-w-[22ch] text-[clamp(30px,4.4vw,52px)] leading-[1.06] font-extrabold">
             Thank the donors behind <span className="whitespace-nowrap">{id}</span>

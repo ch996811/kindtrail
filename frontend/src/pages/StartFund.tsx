@@ -61,7 +61,7 @@ export function StartFund() {
   return (
     <>
       <header className="rounded-b-[36px] bg-band pb-[34px]">
-        <TopBar active="Start a fund" />
+        <TopBar active="Start a fund" role="donor" />
         <div className="mx-auto max-w-[1160px] px-6 pt-[18px]">
           <h1 className="font-display m-0 max-w-[20ch] text-[clamp(30px,4.4vw,52px)] leading-[1.06] font-extrabold">Say how your gift may be used</h1>
           <p className="mt-2.5 mb-0 max-w-[60ch] text-[17px] text-wine/80">
