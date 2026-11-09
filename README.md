@@ -17,8 +17,10 @@ Kindtrail closes that loop:
 5. **Every dollar is traced** back to the individual gifts that funded it, and each donor gets an
    impact receipt: "your $50 bought 4 tarps for the Hualien Mountain Kitchen."
 
-> Status: in active development for the [PayPal AI Hackathon](https://paypalaihackathon.devpost.com/).
-> Everything runs against the PayPal **sandbox** with made-up data.
+> Built for the [PayPal AI Hackathon](https://paypalaihackathon.devpost.com/).
+> **Live demo:** https://kindtrail.onrender.com (the free server may take about a minute to wake up)
+> · **Demo video (2:26):** https://youtu.be/rzFJwjq2478
+> Everything runs against the PayPal **sandbox** with made-up data; no real money moves.
 
 ## How the AI review works
 
@@ -46,9 +48,11 @@ with no key (`LLM_PROVIDER=replay`).
 
 - Backend: Python, FastAPI, SQLite
 - Frontend: React, TypeScript, Vite, Tailwind CSS
-- PayPal: Orders v2 (donations), Payouts, Webhooks, Transaction Search
-- AI: Gemini (receipt vision, rule extraction, explanations) behind a provider switch, with cached
+- PayPal: Orders v2 + JavaScript SDK v6 (donations), Payouts, Webhooks, Transaction Search
+- AI: Gemini (receipt vision, turning donors' words into rules) behind a provider switch, with cached
   replays so the hosted demo keeps working when free quotas run out
+- Hosting: Render (free Docker web service, `render.yaml`)
+- Demo video: `tools/demo_video/` (Gemini TTS narration, Playwright recording of the live site, ffmpeg)
 
 ## Run it locally
 
