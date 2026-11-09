@@ -65,8 +65,10 @@ export function SideTiles({ request }: { request: ReviewRequest }) {
             <span className={`font-semibold ${checks.duplicateReceipt ? 'text-plum' : 'text-mint'}`}>{checks.duplicateReceipt ? 'Yes' : 'No'}</span>
           </li>
           <li className="flex justify-between gap-2.5">
-            <span>Shop in Hualien?</span>
-            <span className="font-semibold text-mint">Yes, {checks.shopInRegion}</span>
+            <span>{checks.region.place ? `Shop in ${checks.region.place}?` : 'Shop location'}</span>
+            <span className={`text-right font-semibold ${checks.region.verdict === 'yes' || checks.region.verdict === 'no-limit' ? 'text-mint' : 'text-plum'}`}>
+              {checks.region.detail}
+            </span>
           </li>
           <li className="flex justify-between gap-2.5">
             <span>Partner's monthly cap</span>

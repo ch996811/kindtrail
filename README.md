@@ -36,7 +36,7 @@ The model reads; plain Python decides.
    doesn't add up. Cash equivalents and alcohol are never paid from restricted gifts.
    Donors see the policy before it is saved, can add or remove uses, and get a live preview of how
    it would judge receipts the AI has already read.
-4. **Reviewer.** A person sees the photo with every line boxed green or red, the reason for each
+4. **Reviewer.** A person sees the photo with every line boxed green or plum, the reason for each
    verdict, and approves the payout.
 
 Models (free tier): `gemini-3.5-flash-lite` with minimal thinking (about 3 s per receipt), falling back
@@ -76,6 +76,11 @@ npm run dev        # http://localhost:5173, proxies /api to :8000
 
 `npm run build` writes `frontend/dist`, which the API serves at http://localhost:8000.
 
+**Without any keys** (`DEMO_MODE=1`, `LLM_PROVIDER=replay`): every page works, the three demo receipts are
+read from the committed AI cache, and the rule engine judges them, so you can start a fund, send a demo
+receipt and see the review desk. Approving needs PayPal sandbox credentials, because that step sends a
+real sandbox payout; giving needs a sandbox buyer account to approve the PayPal checkout.
+
 To check that a sandbox app has everything Kindtrail needs (orders, payouts, balances,
 transaction search), run `python backend/scripts/sandbox_smoke.py`.
 
@@ -113,6 +118,7 @@ docker run --rm -p 8000:8000 -e DEMO_MODE=1 --env-file .env kindtrail
 | GET | `/api/requests/{id}/receipt` | The receipt photo |
 | GET | `/api/requests/{id}` | A spending request with its line verdicts and which gifts would pay for it |
 | POST | `/api/requests/{id}/approve` | Allocate gifts oldest-first, then pay the partner through PayPal Payouts |
+| POST | `/api/requests/{id}/send-back` | Return the request to the partner instead of paying it |
 | POST | `/api/requests/{id}/refresh` | Pull the payout status from PayPal |
 | GET | `/api/reconcile` | Match the ledger against PayPal Transaction Search |
 | POST | `/api/webhooks/paypal` | Verified PayPal webhooks (captures, payout items) |

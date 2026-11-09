@@ -108,11 +108,7 @@ def request_detail(conn: sqlite3.Connection, request_id: str) -> dict[str, Any]:
         funding = [{"gift_id": b.gift_id, "donor": b.donor_name, "date": b.captured_at, "given_cents": b.amount_cents,
                     "used_here_cents": take, "left_cents": b.remaining_cents - take} for b, take in plan]
 
-    month_spent = conn.execute(
-        """SELECT COALESCE(SUM(p.amount_cents), 0) FROM payouts p JOIN requests r ON r.id = p.request_id
-           WHERE r.partner_id = ? AND substr(p.created_at, 1, 7) = substr(?, 1, 7) AND p.request_id != ?""",
-        (partner["id"], now_iso(), request_id),
-    ).fetchone()[0]
+    month_spent = _month_spent(conn, partner["id"], request_id)
     payout = conn.execute("SELECT * FROM payouts WHERE request_id = ?", (request_id,)).fetchone()
     review_info = json.loads(req["review_json"]) if req["review_json"] else {}
     rules = review.policy_chips(json.loads(fund["policy_json"])) if fund["policy_json"] else json.loads(fund["rules_json"])
@@ -142,15 +138,46 @@ def request_detail(conn: sqlite3.Connection, request_id: str) -> dict[str, Any]:
     }
 
 
+def _month_spent(conn: sqlite3.Connection, partner_id: str, request_id: str) -> int:
+    """What the partner has been paid this calendar month, not counting this request."""
+    return conn.execute(
+        """SELECT COALESCE(SUM(p.amount_cents), 0) FROM payouts p JOIN requests r ON r.id = p.request_id
+           WHERE r.partner_id = ? AND substr(p.created_at, 1, 7) = substr(?, 1, 7) AND p.request_id != ?""",
+        (partner_id, now_iso(), request_id),
+    ).fetchone()[0]
+
+
+def _must_be_reviewed(req: sqlite3.Row) -> None:
+    """Two reviewers can have the same request open; the second one gets a plain answer, not a crash."""
+    done = {"paying": "approved", "paid": "approved and paid", "returned": "sent back"}
+    if req["status"] != "reviewed":
+        raise Conflict(f"{req['id']} was already {done.get(req['status'], req['status'])}"
+                       f"{' by ' + req['approved_by'] if req['approved_by'] and req['status'] != 'returned' else ''}. "
+                       "The page now shows where it stands.")
+
+
+def send_back_request(conn: sqlite3.Connection, request_id: str) -> dict[str, Any]:
+    """The reviewer returns the request to the partner instead of paying it. No money moves."""
+    with transaction(conn):
+        req, _ = _load_request(conn, request_id)
+        _must_be_reviewed(req)
+        conn.execute("UPDATE requests SET status = 'returned' WHERE id = ?", (request_id,))
+    return request_detail(conn, request_id)
+
+
 def approve_request(conn: sqlite3.Connection, paypal: PayPal, request_id: str, approver: str) -> dict[str, Any]:
     """Allocate gifts FIFO, then pay the partner the payable amount through PayPal Payouts."""
     with transaction(conn):
         req, items = _load_request(conn, request_id)
-        if req["status"] != "reviewed":
-            raise Conflict(f"request {request_id} is {req['status']}, only reviewed requests can be approved")
+        _must_be_reviewed(req)
         _, payable = ledger.request_amounts(items)
         if payable <= 0:
-            raise Conflict("nothing on this receipt fits the fund")
+            raise Conflict("Nothing on this receipt fits the fund, so there is nothing to pay.")
+        partner = conn.execute("SELECT * FROM partners WHERE id = ?", (req["partner_id"],)).fetchone()
+        spent = _month_spent(conn, partner["id"], request_id)
+        if spent + payable > partner["month_cap_cents"]:
+            raise Conflict(f"Paying {payable / 100:,.2f} would take {partner['name']} past its monthly cap of "
+                           f"{partner['month_cap_cents'] / 100:,.2f} ({spent / 100:,.2f} paid this month).")
         plan = ledger.plan_fifo(ledger.gift_balances(conn, req["fund_code"]), payable)
         for balance, cents in plan:
             conn.execute("INSERT INTO allocations (gift_id, request_id, amount_cents) VALUES (?, ?, ?)",
@@ -164,7 +191,6 @@ def approve_request(conn: sqlite3.Connection, paypal: PayPal, request_id: str, a
         )
         conn.execute("UPDATE requests SET status = 'paying', approved_by = ?, approved_at = ? WHERE id = ?",
                      (approver, stamp, request_id))
-        partner = conn.execute("SELECT * FROM partners WHERE id = ?", (req["partner_id"],)).fetchone()
         fund = conn.execute("SELECT name FROM funds WHERE code = ?", (req["fund_code"],)).fetchone()
 
     # The money only moves after our ledger has committed. If PayPal refuses, undo the ledger.
@@ -428,7 +454,7 @@ def list_requests(conn: sqlite3.Connection) -> list[dict[str, Any]]:
 def _fund_code(conn: sqlite3.Connection, name: str) -> str:
     """FUND-<NAME-IN-CAPS>, made unique. It travels to PayPal in purchase_units.custom_id."""
     slug = "".join(c if c.isascii() and c.isalnum() else "-" for c in name.upper())
-    slug = "-".join(part for part in slug.split("-") if part)[:32] or "GIFTS"
+    slug = "-".join(part for part in slug.split("-") if part and part != "FUND")[:32] or "GIFTS"
     code, n = f"FUND-{slug}", 2
     while conn.execute("SELECT 1 FROM funds WHERE code = ?", (code,)).fetchone():
         code, n = f"FUND-{slug}-{n}", n + 1

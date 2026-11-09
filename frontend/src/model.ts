@@ -42,7 +42,12 @@ export interface ReviewRequest {
   donorWords: string
   rules: FundRule[]
   gifts: Gift[]
-  checks: { duplicateReceipt: boolean; shopInRegion: string; monthSpent: number; monthCap: number }
+  checks: {
+    duplicateReceipt: boolean
+    region: { place: string | null; verdict: 'yes' | 'no' | 'unknown' | 'no-limit'; detail: string }
+    monthSpent: number
+    monthCap: number
+  }
 }
 
 export const lineTotal = (item: LineItem) => Math.round(item.qty * item.unitPrice * 100) / 100

@@ -362,3 +362,64 @@ def test_request_list_puts_waiting_requests_first(client):
     assert [(r["id"], r["status"]) for r in rows] == [("KT-0143", "reviewed"), ("KT-0142", "paying")]
     assert rows[0]["fits"] == 0 and rows[0]["lines"] == 4 and rows[0]["flags"][0].startswith("Bought in Taipei")
     assert (rows[1]["requested_cents"], rows[1]["payable_cents"], rows[1]["partner"]) == (8640, 7760, "Hualien Mountain Kitchen")
+
+
+def test_send_back_returns_the_request_without_paying(client, fake_paypal):
+    give(client, 8000)
+    r = client.post("/api/requests/KT-0142/send-back")
+    assert r.status_code == 200 and r.json()["status"] == "returned"
+    r = client.post("/api/requests/KT-0142/approve")
+    assert r.status_code == 409 and "already sent back" in r.json()["message"]
+    assert fake_paypal.payouts == []
+
+
+def test_a_second_reviewer_gets_a_plain_answer(client):
+    give(client, 8000)
+    client.post("/api/requests/KT-0142/approve", json={"approver": "Lin"})
+    r = client.post("/api/requests/KT-0142/approve", json={"approver": "Sam"})
+    assert r.status_code == 409
+    assert r.json()["message"].startswith("KT-0142 was already approved by Lin.")
+
+
+def test_the_partner_monthly_cap_is_enforced(client, conn, fake_paypal):
+    give(client, 8000)
+    conn.execute("UPDATE partners SET month_cap_cents = 5000")
+    r = client.post("/api/requests/KT-0142/approve")
+    assert r.status_code == 409 and "monthly cap" in r.json()["message"]
+    assert fake_paypal.payouts == [] and client.get("/api/requests/KT-0142").json()["status"] == "reviewed"
+
+
+def test_receipt_photos_are_never_cached(client):
+    assert client.get("/api/requests/KT-0142/receipt").headers["cache-control"] == "no-store"
+
+
+def test_one_visitor_cannot_flood_the_shared_demo(client):
+    codes = [client.post("/api/requests/KT-9999/approve").status_code for _ in range(9)]
+    assert codes[:8] == [404] * 8 and codes[8] == 429
+
+
+def test_fund_codes_dont_repeat_the_word_fund(client):
+    body = {"name": "Guangfu Kids Fund", "donor_words": "Only for kids in Guangfu.",
+            "policy": {"region": "Hualien County", "allowed": ["food"], "never": []}}
+    assert client.post("/api/funds", json=body).json()["code"] == "FUND-GUANGFU-KIDS"
+
+
+def test_demo_reset_also_clears_what_visitors_added(conn, fake_paypal, llm, tmp_path):
+    from fastapi.testclient import TestClient
+
+    from app.config import Settings
+    from app.main import create_app
+
+    settings = Settings(paypal_env="sandbox", paypal_client_id="x", paypal_client_secret="y", paypal_webhook_id="",
+                        partner_email=PARTNER_EMAIL, llm_provider="replay", gemini_api_key="", llm_daily_cap=5,
+                        demo_mode=True, db_path=":memory:", frontend_dist=str(tmp_path / "none"))
+    with TestClient(create_app(settings, paypal=fake_paypal, conn=conn, llm=llm)) as c:
+        assert upload(c, DEMO / "taipei-corner-store.jpg").json()["id"] == "KT-0143"
+        c.post("/api/funds", json={"name": "Visitor Fund", "donor_words": "Food only.",
+                                   "policy": {"region": None, "allowed": ["food"], "never": []}})
+        c.post("/api/gifts", json={"fund_code": FUND, "donor_name": "Abandoned", "amount_cents": 1000})
+        assert c.post("/api/demo/reset").status_code == 200
+        assert c.get("/api/requests/KT-0143").status_code == 404
+        assert [f["code"] for f in c.get("/api/funds").json()] == [FUND]
+        assert c.get(f"/api/funds/{FUND}").json()["available_cents"] == 9500
+        assert [r["id"] for r in c.get("/api/requests").json()] == ["KT-0142"]

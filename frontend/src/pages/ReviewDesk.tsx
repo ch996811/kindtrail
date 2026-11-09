@@ -6,7 +6,7 @@ import { ReviewPanel } from '../components/ReviewPanel'
 import { SideTiles } from '../components/SideTiles'
 import { TopBar } from '../components/TopBar'
 import { Trail } from '../components/Trail'
-import { approveRequest, getConfig, getRequest, refreshRequest, resetDemo, toReviewModel } from '../api'
+import { approveRequest, getConfig, getRequest, refreshRequest, resetDemo, sendBackRequest, toReviewModel } from '../api'
 import { usd } from '../model'
 
 const APPROVER = 'Lin'
@@ -34,13 +34,21 @@ export function ReviewDesk({ requestId }: { requestId: string }) {
     mutationFn: resetDemo,
     onSuccess: () => {
       approve.reset()
+      sendBack.reset()
       qc.invalidateQueries()
     },
   })
 
+  // The demo is shared: if someone else already decided, reload so the page shows where the request stands.
   const approve = useMutation({
     mutationFn: () => approveRequest(requestId, APPROVER),
     onSuccess: (fresh) => qc.setQueryData(key, fresh),
+    onError: () => qc.invalidateQueries({ queryKey: key }),
+  })
+  const sendBack = useMutation({
+    mutationFn: () => sendBackRequest(requestId),
+    onSuccess: (fresh) => qc.setQueryData(key, fresh),
+    onError: () => qc.invalidateQueries({ queryKey: key }),
   })
 
   if (isPending || error) {
@@ -55,9 +63,11 @@ export function ReviewDesk({ requestId }: { requestId: string }) {
   }
 
   const request = toReviewModel(data)
-  const stage: Stage = data.status === 'paid' ? 'paid' : data.status === 'paying' || approve.isPending ? 'paying' : 'review'
-  const notice = approve.error
-    ? approve.error.message
+  const stage: Stage =
+    data.status === 'paid' ? 'paid' : data.status === 'returned' ? 'returned' : data.status === 'paying' || approve.isPending ? 'paying' : 'review'
+  const decisionError = approve.error ?? sendBack.error
+  const notice = decisionError
+    ? decisionError.message
     : data.payable_cents === 0 && stage === 'review'
       ? 'Nothing on this receipt fits the fund. Send it back to the partner.'
       : data.shortfall_cents > 0
@@ -70,7 +80,10 @@ export function ReviewDesk({ requestId }: { requestId: string }) {
       detail: data.payable_cents === 0 ? 'nothing to pay' : `${data.funding.length} ${data.funding.length === 1 ? 'donor' : 'donors'}`,
     },
     { label: 'Asked', detail: request.submitted },
-    { label: stage === 'review' ? 'Your review' : 'Approved', detail: `by ${data.approved_by ?? APPROVER}` },
+    {
+      label: stage === 'review' ? 'Your review' : stage === 'returned' ? 'Sent back' : 'Approved',
+      detail: stage === 'returned' ? 'to the partner' : `by ${data.approved_by ?? APPROVER}`,
+    },
     { label: 'Paid', detail: 'via PayPal' },
     { label: 'Thank-you', detail: 'to each donor' },
   ]
@@ -81,16 +94,22 @@ export function ReviewDesk({ requestId }: { requestId: string }) {
         <TopBar active="Review desk" role="charity" />
         <div className="mx-auto max-w-[1160px] px-6 pt-[18px]">
           <h1 className="font-display m-0 max-w-[20ch] text-[clamp(30px,4.4vw,52px)] leading-[1.06] font-extrabold">
-            {request.partner} needs {usd(data.requested_cents / 100)} for {request.purpose}
+            {stage === 'paid'
+              ? `${request.partner} was paid ${usd(data.payable_cents / 100)} for ${request.purpose}`
+              : stage === 'returned'
+                ? `Sent back: ${request.partner}'s ${usd(data.requested_cents / 100)} for ${request.purpose}`
+                : `${request.partner} needs ${usd(data.requested_cents / 100)} for ${request.purpose}`}
           </h1>
           <p className="mt-2.5 mb-0 max-w-[56ch] text-[17px] text-wine/80">
             {stage === 'paid'
               ? `Request ${request.id} is paid. Next, each donor gets a receipt showing what their gift bought.`
-              : stage === 'paying'
-                ? `Sending ${usd(data.payable_cents / 100)} through PayPal Payouts. This usually takes a few seconds.`
-                : `Request ${request.id} from the ${request.fund}. The AI has checked the receipt; it's your call now.`}
+              : stage === 'returned'
+                ? `Request ${request.id} went back to ${request.partner} with the reasons below. No money moved.`
+                : stage === 'paying'
+                  ? `Sending ${usd(data.payable_cents / 100)} through PayPal Payouts. This usually takes a few seconds.`
+                  : `Request ${request.id} from the ${request.fund}. The AI has checked the receipt; it's your call now.`}
           </p>
-          {stage === 'paid' && config.data?.demo_mode && (
+          {(stage === 'paid' || stage === 'returned') && config.data?.demo_mode && (
             <button
               type="button"
               onClick={() => reset.mutate()}
@@ -119,6 +138,7 @@ export function ReviewDesk({ requestId }: { requestId: string }) {
         notice={notice}
         canApprove={data.shortfall_cents === 0 && data.payable_cents > 0}
         onApprove={() => approve.mutate()}
+        onSendBack={() => sendBack.mutate()}
         thanksTo={`/requests/${requestId}/thanks`}
       />
     </>

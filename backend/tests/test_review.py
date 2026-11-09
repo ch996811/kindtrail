@@ -152,3 +152,32 @@ def test_warm_up_only_lists_models_and_never_fails():
         raise httpx.ConnectError("no network")
 
     GeminiProvider("k", transport=httpx.MockTransport(broken)).warm_up()  # swallowed
+
+
+def test_an_unreadable_photo_pays_nothing():
+    r = judge(receipt(("Tarp", 4, 8.0, "shelter"), readable=False), POLICY)
+    assert verdicts(r) == [("Tarp", "blocked")]
+    assert [f["kind"] for f in r.flags] == ["unreadable"]
+
+
+def test_a_receipt_in_another_currency_is_not_paid_as_dollars():
+    r = judge({**receipt(("Rice", 2, 400.0, "food")), "currency": "TWD"}, POLICY)
+    assert verdicts(r) == [("Rice", "blocked")]
+    assert [f["kind"] for f in r.flags] == ["currency"] and "TWD" in r.flags[0]["message"]
+
+
+def test_when_the_shop_or_the_date_cant_be_read_the_limits_fail_closed():
+    for region, printed, kind in (("unknown", "2026-10-24 14:32", "region"), ("", "2026-10-24 14:32", "region"),
+                                  ("Hualien County", "", "expired")):
+        r = judge(receipt(("Tarp", 4, 8.0, "shelter"), region=region, printed=printed), POLICY)
+        assert verdicts(r) == [("Tarp", "blocked")], (region, printed)
+        assert [f["kind"] for f in r.flags] == [kind]
+        assert "Bought in" not in r.flags[0]["message"]  # never "Bought in unknown"
+
+
+def test_place_names_match_whole_places_only():
+    taipei = {**POLICY, "region": "Taipei City"}
+    assert verdicts(judge(receipt(("Water", 1, 2.0, "water"), region="New Taipei City"), taipei)) == [("Water", "blocked")]
+    assert verdicts(judge(receipt(("Water", 1, 2.0, "water"), region="Taipei City"), taipei)) == [("Water", "fits")]
+    township = {**POLICY, "region": "Guangfu Township, Hualien County"}
+    assert verdicts(judge(receipt(("Tarp", 1, 8.0, "shelter"), region="Hualien County"), township)) == [("Tarp", "fits")]

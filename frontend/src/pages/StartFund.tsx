@@ -142,12 +142,20 @@ export function StartFund() {
                   Every PayPal gift to it carries the tag <b className="font-semibold text-wine">{create.data.code}</b>, and every receipt
                   is checked against the rules you set.
                 </p>
-                <Link
-                  to={`/submit?fund=${encodeURIComponent(create.data.code)}`}
-                  className="inline-block rounded-[14px] bg-pink px-[18px] py-3 font-bold text-white no-underline hover:bg-pink-hover"
-                >
-                  Send a receipt to this fund
-                </Link>
+                <div className="flex flex-wrap gap-2.5">
+                  <Link
+                    to={`/give?fund=${encodeURIComponent(create.data.code)}`}
+                    className="inline-block rounded-[14px] bg-pink px-[18px] py-3 font-bold text-white no-underline hover:bg-pink-hover"
+                  >
+                    Give to this fund
+                  </Link>
+                  <Link
+                    to={`/submit?fund=${encodeURIComponent(create.data.code)}`}
+                    className="inline-block rounded-[14px] bg-blush px-[18px] py-3 font-bold text-wine no-underline hover:bg-petal"
+                  >
+                    Send a receipt to it
+                  </Link>
+                </div>
               </>
             ) : (
               <>

@@ -164,6 +164,7 @@ export async function submitReceipt(form: { fundCode: string; partnerId: string;
 }
 export const approveRequest = (id: string, approver: string) => call<RequestDetail>('POST', `/api/requests/${id}/approve`, { approver })
 export const refreshRequest = (id: string) => call<RequestDetail>('POST', `/api/requests/${id}/refresh`)
+export const sendBackRequest = (id: string) => call<RequestDetail>('POST', `/api/requests/${id}/send-back`)
 
 const TONES: Gift['tone'][] = ['pink', 'sun', 'mint']
 const shortDate = (iso: string) => new Date(iso).toLocaleDateString('en-US', { month: 'short', day: 'numeric' })
@@ -202,10 +203,23 @@ export function toReviewModel(d: RequestDetail): ReviewRequest {
       tone: TONES[n % TONES.length],
     })),
     checks: {
-      duplicateReceipt: false, // TODO(W2): receipt fingerprinting
-      shopInRegion: d.shop.branch.replace(/ branch$/, ''),
+      duplicateReceipt: d.flags.some((f) => f.kind === 'duplicate'),
+      region: regionCheck(d),
       monthSpent: d.checks.month_spent_cents / 100,
       monthCap: d.checks.month_cap_cents / 100,
     },
   }
+}
+
+/** The shop-location check as the rule engine decided it, for the "Also checked" tile. */
+function regionCheck(d: RequestDetail): ReviewRequest['checks']['region'] {
+  const where = d.fund.rules.find((r) => r.kind === 'Where')?.value ?? null
+  if (!where) return { place: null, verdict: 'no-limit', detail: 'no limit' }
+  const place = where.split(',').pop()!.replace(/ (County|City)$/, '').trim()
+  const flag = d.flags.find((f) => f.kind === 'region')
+  if (d.flags.some((f) => f.kind === 'unreadable') || flag?.message.startsWith("The AI couldn't")) {
+    return { place, verdict: 'unknown', detail: "couldn't tell" }
+  }
+  if (flag) return { place, verdict: 'no', detail: `No, ${d.shop.region}` }
+  return { place, verdict: 'yes', detail: `Yes, ${d.shop.branch || d.shop.region}` }
 }

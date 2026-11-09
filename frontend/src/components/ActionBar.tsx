@@ -2,7 +2,7 @@ import { AnimatePresence, motion } from 'motion/react'
 import { Link } from 'react-router'
 import { usd } from '../model'
 
-export type Stage = 'review' | 'paying' | 'paid'
+export type Stage = 'review' | 'paying' | 'paid' | 'returned'
 
 interface Props {
   partner: string
@@ -11,13 +11,19 @@ interface Props {
   notice?: string // an error or a reason approval is blocked
   canApprove: boolean
   onApprove: () => void
+  onSendBack: () => void
   thanksTo: string // where "Send donor thank-yous" leads once paid
 }
 
 /** Floating decision bar. Approving moves the coin to the "Paid" stop once PayPal confirms. */
-export function ActionBar({ partner, amount, stage, notice, canApprove, onApprove, thanksTo }: Props) {
+export function ActionBar({ partner, amount, stage, notice, canApprove, onApprove, onSendBack, thanksTo }: Props) {
   const message =
-    notice ?? (stage === 'paid' ? `${usd(amount)} sent to ${partner} through PayPal Payouts` : `Pays ${partner} via PayPal Payouts`)
+    notice ??
+    (stage === 'paid'
+      ? `${usd(amount)} sent to ${partner} through PayPal Payouts`
+      : stage === 'returned'
+        ? `Sent back to ${partner}. No money moved.`
+        : `Pays ${partner} via PayPal Payouts`)
   return (
     <div className="fixed bottom-[18px] left-1/2 flex w-[min(760px,calc(100%-32px))] -translate-x-1/2 items-center gap-2.5 rounded-[22px] bg-wine py-3 pr-3 pl-[22px] text-white shadow-[0_18px_40px_-16px_rgb(58_11_37/0.6)] max-sm:flex-wrap">
       <AnimatePresence mode="wait" initial={false}>
@@ -32,9 +38,18 @@ export function ActionBar({ partner, amount, stage, notice, canApprove, onApprov
           {message}
         </motion.span>
       </AnimatePresence>
-      {stage !== 'paid' ? (
+      {stage === 'returned' ? (
+        <Link to="/requests" className="rounded-[14px] bg-white px-[18px] py-3 text-center font-bold text-wine no-underline max-sm:flex-1">
+          See all requests
+        </Link>
+      ) : stage !== 'paid' ? (
         <>
-          <button type="button" disabled={stage === 'paying'} className="rounded-[14px] bg-white/12 px-[18px] py-3 font-bold disabled:opacity-50 max-sm:flex-1">
+          <button
+            type="button"
+            onClick={onSendBack}
+            disabled={stage === 'paying'}
+            className="rounded-[14px] bg-white/12 px-[18px] py-3 font-bold hover:bg-white/20 disabled:opacity-50 max-sm:flex-1"
+          >
             Send back
           </button>
           <button

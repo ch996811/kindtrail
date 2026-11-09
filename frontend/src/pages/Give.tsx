@@ -161,8 +161,21 @@ export function Give() {
             </label>
 
             <div className="mt-6">
-              <paypal-button type="pay" hidden={status.name !== 'ready' && status.name !== 'error'} onClick={pay} className="block w-full max-w-[420px]" />
-              {status.name === 'loading' && <p className="m-0 text-[15px] text-wine-2">Loading PayPal...</p>}
+              <paypal-button
+                type="pay"
+                hidden={fund.isError || (status.name !== 'ready' && status.name !== 'error')}
+                onClick={pay}
+                className="block w-full max-w-[420px]"
+              />
+              {fund.isError && (
+                <p className="m-0 text-[15px] font-medium text-plum" role="alert">
+                  There&rsquo;s no fund called {fundCode}.{' '}
+                  <Link to="/give" className="text-wine underline">
+                    Give to the Hualien Kids Typhoon Fund
+                  </Link>
+                </p>
+              )}
+              {status.name === 'loading' && !fund.isError && <p className="m-0 text-[15px] text-wine-2">Loading PayPal...</p>}
               {status.name === 'paying' && <p className="m-0 text-[15px] text-wine-2" role="status">Waiting for PayPal...</p>}
               {status.name === 'unavailable' && (
                 <p className="m-0 text-[15px] font-medium text-plum" role="alert">
@@ -183,6 +196,7 @@ export function Give() {
 
         <section className="rounded-[22px] bg-white px-[22px] py-5">
           <h2 className="font-heading m-0 text-xl font-bold">Where your gift can go</h2>
+          <p className="mt-1 mb-0 text-sm text-wine-2">Every gift to this fund follows these limits, set in the words of the person who started it:</p>
           {fund.data?.donor_words && <p className="mt-2 mb-3 text-[15px] leading-snug text-wine-2">&ldquo;{fund.data.donor_words}&rdquo;</p>}
           <div className="flex flex-wrap gap-2">
             {(fund.data?.rules ?? []).map((r) => (

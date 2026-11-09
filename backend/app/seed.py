@@ -81,11 +81,19 @@ def seed(conn: sqlite3.Connection, partner_email: str, llm: LLM | None = None, d
 
 
 def reset_demo(conn: sqlite3.Connection) -> None:
-    """Put every request back to 'reviewed' and clear the ledger, so visitors can run the demo again.
-    Sandbox payouts already sent stay sent; only Kindtrail's own records are cleared."""
+    """Back to the starting state, so visitors can run the demo again: the ledger is cleared, KT-0142 is waiting
+    for review, and requests, funds and unpaid orders that visitors added are removed (the demo is shared, so
+    one visitor's test photos shouldn't stay up for the next). Gifts that really went through PayPal stay, and
+    sandbox payouts already sent stay sent; only Kindtrail's own records are cleared."""
+    keep = DEMO_REQUEST["id"]
     with transaction(conn):
         conn.execute("DELETE FROM allocations")
         conn.execute("DELETE FROM payouts")
+        conn.execute("DELETE FROM request_items WHERE request_id != ?", (keep,))
+        conn.execute("DELETE FROM requests WHERE id != ?", (keep,))
+        conn.execute("DELETE FROM receipts WHERE sha256 NOT IN (SELECT receipt_sha FROM requests WHERE receipt_sha IS NOT NULL)")
+        conn.execute("DELETE FROM gifts WHERE fund_code != ? OR status = 'created'", (FUND_CODE,))
+        conn.execute("DELETE FROM funds WHERE code != ?", (FUND_CODE,))
         conn.execute("UPDATE requests SET status = 'reviewed', approved_by = NULL, approved_at = NULL")
 
 

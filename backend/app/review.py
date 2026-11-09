@@ -122,10 +122,25 @@ def _cents(x: float) -> int:
     return int(round(float(x) * 100))
 
 
+USD_NAMES = {"USD", "US$", "US DOLLAR", "US DOLLARS"}
+UNKNOWN = {"", "unknown", "n/a", "none", "null", "-"}
+
+
+def _places(region: str) -> list[str]:
+    """'Guangfu Township, Hualien County' -> ['guangfu township', 'hualien']: comma parts, minus county/city."""
+    out = []
+    for part in region.lower().split(","):
+        words = [w for w in part.split() if w not in ("county", "city")]
+        if words:
+            out.append(" ".join(words))
+    return out
+
+
 def _region_matches(shop_region: str, fund_region: str) -> bool:
-    a = shop_region.lower().replace("county", "").replace("city", "").strip()
-    b = fund_region.lower().replace("county", "").replace("city", "").strip()
-    return bool(a) and bool(b) and (a in b or b in a)
+    """A whole place name has to match, so 'New Taipei City' is not 'Taipei City'. Receipts usually name only
+    the county, so a county-level receipt passes a fund limited to a township in that county."""
+    shop, fund = _places(shop_region), _places(fund_region)
+    return any(s == f for s in shop for f in fund)
 
 
 def judge(receipt: dict[str, Any], policy: dict[str, Any], *, duplicate_of: str | None = None) -> Review:
@@ -138,29 +153,38 @@ def judge(receipt: dict[str, Any], policy: dict[str, Any], *, duplicate_of: str 
     ]
     review = Review(lines=lines, shop=shop, receipt_total_cents=_cents(receipt.get("total") or 0))
 
-    if not receipt.get("readable", True):
-        review.flags.append({"kind": "unreadable", "severity": "block",
-                             "message": "The photo isn't a readable receipt. Ask the partner for a clearer one."})
-
-    # Receipt-wide problems block every line.
+    # Receipt-wide problems block every line. When the model can't tell us something a limit depends on,
+    # nothing is paid: a person has to look.
     block_all = None
-    if duplicate_of:
-        block_all = f"This receipt was already submitted with request {duplicate_of}."
-        review.flags.append({"kind": "duplicate", "severity": "block", "message": block_all})
-    region = policy.get("region")
-    if region and shop.get("region") and not _region_matches(shop["region"], region):
-        msg = f"Bought in {shop['region']}, but donors limited this fund to {region}."
-        review.flags.append({"kind": "region", "severity": "block", "message": msg})
+
+    def block(kind: str, msg: str) -> None:
+        nonlocal block_all
+        review.flags.append({"kind": kind, "severity": "block", "message": msg})
         block_all = block_all or msg
+
+    if not receipt.get("readable", True):
+        block("unreadable", "The photo isn't a readable receipt. Ask the partner for a clearer one.")
+        return _verdicts(review, policy, block_all)
+
+    if duplicate_of:
+        block("duplicate", f"This receipt was already submitted with request {duplicate_of}.")
+    currency = str(receipt.get("currency") or "").strip().upper()
+    if currency not in USD_NAMES:
+        shown = currency if currency.lower() not in UNKNOWN else "an unknown currency"
+        block("currency", f"This receipt is in {shown}. The fund pays in US dollars and Kindtrail doesn't convert "
+                          "currencies yet, so a person has to handle it.")
+    region, shop_region = policy.get("region"), str(shop.get("region") or "").strip()
+    if region and shop_region.lower() in UNKNOWN:
+        block("region", f"The AI couldn't tell where the shop is, so the {region} limit can't be checked.")
+    elif region and not _region_matches(shop_region, region):
+        block("region", f"Bought in {shop_region}, but donors limited this fund to {region}.")
     until, printed = policy.get("until"), (shop.get("printed_at") or "")[:10]
-    if until and printed:
+    if until:
         try:
             if date.fromisoformat(printed) > date.fromisoformat(until):
-                msg = f"Bought on {printed}, after the fund's end date ({until})."
-                review.flags.append({"kind": "expired", "severity": "block", "message": msg})
-                block_all = block_all or msg
+                block("expired", f"Bought on {printed}, after the fund's end date ({until}).")
         except ValueError:
-            pass
+            block("expired", f"The AI couldn't read the purchase date, so the end date ({until}) can't be checked.")
 
     # Arithmetic checks catch misreads; they don't decide anything but the reviewer should look.
     for ln in lines:
@@ -173,7 +197,11 @@ def judge(receipt: dict[str, Any], policy: dict[str, Any], *, duplicate_of: str 
         review.flags.append({"kind": "math", "severity": "check",
                              "message": f"The lines add up to {lines_sum / 100:.2f} but the receipt total "
                                         f"is {review.receipt_total_cents / 100:.2f}. Check the photo."})
+    return _verdicts(review, policy, block_all)
 
+
+def _verdicts(review: Review, policy: dict[str, Any], block_all: str | None) -> Review:
+    lines = review.lines
     allowed = set(policy.get("allowed") or [])
     never = set(policy.get("never") or []) | ALWAYS_NEVER
     allowed_text = ", ".join(LABELS[c] for c in CATEGORIES if c in allowed) or "nothing yet"

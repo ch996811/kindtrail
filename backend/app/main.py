@@ -2,6 +2,8 @@
 import logging
 import sqlite3
 import threading
+import time
+from collections import defaultdict, deque
 from collections.abc import Iterator
 from contextlib import asynccontextmanager
 from datetime import date, datetime, timedelta, timezone
@@ -76,6 +78,51 @@ RECEIPT_TYPES = {"image/jpeg", "image/png", "image/webp"}
 MAX_RECEIPT_BYTES = 6 * 1024 * 1024
 
 
+class TooMany(Exception):
+    pass
+
+
+class RateLimit:
+    """An in-memory limit per visitor and, optionally, for everyone together. The hosted demo is public and shared,
+    so one script shouldn't be able to drain the sandbox balance or the free AI quota. Resets on restart."""
+
+    def __init__(self, what: str, seconds: int, per_visitor: int | None = None, everyone: int | None = None):
+        self.what, self.seconds, self.per_visitor, self.everyone = what, seconds, per_visitor, everyone
+        self.hits: dict[str, deque[float]] = defaultdict(deque)
+        self.lock = threading.Lock()
+
+    @staticmethod
+    def visitor(request: Request) -> str:
+        forwarded = request.headers.get("x-forwarded-for", "").split(",")[0].strip()  # Render's proxy
+        return forwarded or (request.client.host if request.client else "?")
+
+    def _limits(self, request: Request) -> list[tuple[str, int]]:
+        out = [(self.visitor(request), self.per_visitor)] if self.per_visitor else []
+        return out + ([("*", self.everyone)] if self.everyone else [])
+
+    def check(self, request: Request) -> None:
+        now = time.monotonic()
+        with self.lock:
+            for key, limit in self._limits(request):
+                q = self.hits[key]
+                while q and now - q[0] > self.seconds:
+                    q.popleft()
+                if len(q) >= limit:
+                    if key == "*":
+                        raise TooMany(f"The shared demo has reached its limit of {limit} {self.what} for now, to keep "
+                                      "the sandbox working for everyone. Please try again later.")
+                    raise TooMany(f"That's a lot of {self.what} in a short time. Please wait a few minutes.")
+
+    def hit(self, request: Request) -> None:
+        with self.lock:
+            for key, _ in self._limits(request):
+                self.hits[key].append(time.monotonic())
+
+    def __call__(self, request: Request) -> None:
+        self.check(request)
+        self.hit(request)
+
+
 def create_app(settings: Settings | None = None, paypal: Any = None, conn: sqlite3.Connection | None = None,
                llm: LLM | None = None) -> FastAPI:
     settings = settings or load_settings()
@@ -94,6 +141,16 @@ def create_app(settings: Settings | None = None, paypal: Any = None, conn: sqlit
         yield
 
     app = FastAPI(title="Kindtrail", lifespan=lifespan)
+    decisions = RateLimit("approvals and send-backs", 600, per_visitor=8)
+    payouts = RateLimit("sandbox payouts today", 86400, everyone=12)
+    resets = RateLimit("demo resets", 600, per_visitor=6)
+    uploads = RateLimit("receipt uploads", 3600, per_visitor=12)
+    readings = RateLimit("readings of donor words", 3600, per_visitor=30)
+    checkouts = RateLimit("checkout attempts", 3600, per_visitor=20)
+
+    @app.exception_handler(TooMany)
+    async def _too_many(_: Request, exc: TooMany):
+        return JSONResponse({"error": "rate_limited", "message": str(exc)}, status_code=429)
 
     @app.exception_handler(service.NotFound)
     async def _not_found(_: Request, exc: service.NotFound):
@@ -140,7 +197,7 @@ def create_app(settings: Settings | None = None, paypal: Any = None, conn: sqlit
         return {"paypal_client_id": settings.paypal_client_id, "paypal_env": settings.paypal_env,
                 "demo_mode": settings.demo_mode}
 
-    @app.post("/api/demo/reset")
+    @app.post("/api/demo/reset", dependencies=[Depends(resets)])
     def demo_reset(conn: sqlite3.Connection = Depends(db)):
         if not settings.demo_mode:
             raise service.NotFound("demo reset is only available in demo mode")
@@ -159,7 +216,7 @@ def create_app(settings: Settings | None = None, paypal: Any = None, conn: sqlit
     def get_fund(code: str, conn: sqlite3.Connection = Depends(db)):
         return service.fund_summary(conn, code)
 
-    @app.post("/api/gifts", status_code=201)
+    @app.post("/api/gifts", status_code=201, dependencies=[Depends(checkouts)])
     def create_gift(body: GiftIn, request: Request, conn: sqlite3.Connection = Depends(db)):
         return service.create_gift(conn, pp(request), fund_code=body.fund_code,
                                    donor_name=body.donor_name, amount_cents=body.amount_cents)
@@ -172,7 +229,7 @@ def create_app(settings: Settings | None = None, paypal: Any = None, conn: sqlit
     def capture_gift(order_id: str, request: Request, conn: sqlite3.Connection = Depends(db)):
         return service.capture_gift(conn, pp(request), order_id)
 
-    @app.post("/api/limits/parse")
+    @app.post("/api/limits/parse", dependencies=[Depends(readings)])
     def parse_limits(body: LimitsIn, conn: sqlite3.Connection = Depends(db)):
         return service.parse_limits(conn, llm, body.donor_words)
 
@@ -185,7 +242,7 @@ def create_app(settings: Settings | None = None, paypal: Any = None, conn: sqlit
         receipts = [(p.stem, p.read_bytes()) for p in sorted((DEMO_DIR / "receipts").glob("*.jpg"))]
         return service.preview_policy(conn, llm, body.as_policy(), receipts)
 
-    @app.post("/api/requests", status_code=201)
+    @app.post("/api/requests", status_code=201, dependencies=[Depends(uploads)])
     def create_request(fund_code: str = Form(...), partner_id: str = Form(...),
                        purpose: str = Form(..., min_length=1, max_length=120), receipt: UploadFile = File(...),
                        conn: sqlite3.Connection = Depends(db)):
@@ -211,7 +268,8 @@ def create_app(settings: Settings | None = None, paypal: Any = None, conn: sqlit
     @app.get("/api/requests/{request_id}/receipt")
     def get_receipt(request_id: str, conn: sqlite3.Connection = Depends(db)):
         data, mime = service.receipt_image(conn, request_id)
-        return Response(data, media_type=mime, headers={"Cache-Control": "public, max-age=86400"})
+        # Request ids start again after a demo reset or a restart, so a cached photo could belong to someone else.
+        return Response(data, media_type=mime, headers={"Cache-Control": "no-store"})
 
     @app.get("/api/requests")
     def list_requests(conn: sqlite3.Connection = Depends(db)):
@@ -221,10 +279,17 @@ def create_app(settings: Settings | None = None, paypal: Any = None, conn: sqlit
     def get_request(request_id: str, conn: sqlite3.Connection = Depends(db)):
         return service.request_detail(conn, request_id)
 
-    @app.post("/api/requests/{request_id}/approve")
+    @app.post("/api/requests/{request_id}/approve", dependencies=[Depends(decisions)])
     def approve(request_id: str, request: Request, body: ApproveIn | None = None,
                 conn: sqlite3.Connection = Depends(db)):
-        return service.approve_request(conn, pp(request), request_id, (body or ApproveIn()).approver)
+        payouts.check(request)  # counted only when a payout is really sent
+        result = service.approve_request(conn, pp(request), request_id, (body or ApproveIn()).approver)
+        payouts.hit(request)
+        return result
+
+    @app.post("/api/requests/{request_id}/send-back", dependencies=[Depends(decisions)])
+    def send_back(request_id: str, conn: sqlite3.Connection = Depends(db)):
+        return service.send_back_request(conn, request_id)
 
     @app.post("/api/requests/{request_id}/refresh")
     def refresh(request_id: str, request: Request, conn: sqlite3.Connection = Depends(db)):

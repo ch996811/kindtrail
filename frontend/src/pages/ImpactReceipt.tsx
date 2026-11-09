@@ -62,8 +62,8 @@ export function ImpactReceipt() {
           </h1>
           <p className="mt-2.5 mb-0 max-w-[62ch] text-[17px] text-wine/80">
             {spend
-              ? `You gave to the ${d.fund.name} on ${day(d.gift.given_at)}. ${spend.partner} spent it on ${day(spend.shop.printed_at)}, and every line was checked against your limits before PayPal paid a cent.`
-              : `You gave to the ${d.fund.name} on ${day(d.gift.given_at)}. Your gift is waiting for the first request that fits your limits.`}
+              ? `You gave to the ${d.fund.name} on ${day(d.gift.given_at)}. ${spend.partner} spent it on ${day(spend.shop.printed_at)}, and every line was checked against the fund’s limits before PayPal paid a cent.`
+              : `You gave to the ${d.fund.name} on ${day(d.gift.given_at)}. Your gift is waiting for the first request that fits the fund’s limits.`}
           </p>
           <Trail stops={stops} current={!spend ? 0 : spend.status === 'paid' ? 4 : 3} />
         </div>
@@ -76,7 +76,7 @@ export function ImpactReceipt() {
 
         <section className="mt-[26px] grid gap-[18px] lg:grid-cols-[7fr_5fr]">
           <div className="rounded-[22px] bg-white px-[22px] py-5">
-            <h2 className="font-heading m-0 text-xl font-bold">Your limits</h2>
+            <h2 className="font-heading m-0 text-xl font-bold">The limits your gift came with</h2>
             <div className="mt-3 flex flex-wrap gap-2">
               {d.fund.rules.map((r) => (
                 <span key={r.kind} className="rounded-full bg-blush px-[13px] py-1.5 text-sm">
@@ -91,8 +91,8 @@ export function ImpactReceipt() {
             </h2>
             <p className="mt-1 mb-0 text-[15px] text-white/80">
               {d.left_cents > 0
-                ? 'It stays in the fund until a request fits your limits, and you’ll get another receipt when it’s spent.'
-                : `All ${usd(d.gift.amount_cents / 100)} of your gift went to purchases that matched your limits.`}
+                ? 'It stays in the fund until a request fits the fund’s limits, and you’ll get another receipt when it’s spent.'
+                : `All ${usd(d.gift.amount_cents / 100)} of your gift went to purchases that matched the fund’s limits.`}
             </p>
           </div>
         </section>
@@ -208,7 +208,7 @@ function SpendView({ spend }: { spend: Spend }) {
             <li className="flex gap-2.5">
               <Tick />
               <span>
-                The AI read the receipt from {spend.shop.name} and Kindtrail&rsquo;s rules checked every line against your limits.
+                The AI read the receipt from {spend.shop.name} and Kindtrail&rsquo;s rules checked every line against the fund&rsquo;s limits.
               </span>
             </li>
             {spend.refused.map((r) => (

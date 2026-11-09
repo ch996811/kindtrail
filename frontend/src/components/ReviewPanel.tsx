@@ -33,7 +33,7 @@ function Ring({ fits, total, delay }: { fits: number; total: number; delay: numb
         transform="rotate(-90 37 37)"
         strokeDasharray={c}
         initial={{ strokeDashoffset: c }}
-        animate={{ strokeDashoffset: c * (1 - fits / total) }}
+        animate={{ strokeDashoffset: total ? c * (1 - fits / total) : c }}
         transition={{ delay: Math.max(0, delay), duration: 0.8, ease: 'easeOut' }}
       />
       <text x="37" y="43" textAnchor="middle" className="fill-wine text-lg font-extrabold">
@@ -50,6 +50,7 @@ const MODEL_NAMES: Record<string, string> = {
 
 function headline(fits: number, blocked: { label: string }[]) {
   const total = fits + blocked.length
+  if (total === 0) return 'No lines could be read from this photo, so nothing can be paid.'
   if (blocked.length === 0) return 'Every item fits the fund.'
   if (fits === 0) return "Nothing on this receipt can be paid from donors' money."
   const what = blocked.length === 1 ? `The ${blocked[0].label.replace(/^\d+ /, '').toLowerCase()} can't` : `${blocked.length} items can't`
