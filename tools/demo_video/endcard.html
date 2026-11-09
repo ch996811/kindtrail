@@ -1,0 +1,38 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Kindtrail end card</title>
+<link href="https://fonts.googleapis.com/css2?family=Bricolage+Grotesque:opsz,wdth,wght@12..96,75..100,400..800&display=swap" rel="stylesheet">
+<link href="https://fonts.googleapis.com/css2?family=Noto+Sans+TC:wght@900&text=%E5%96%84%E8%B9%A4&display=swap" rel="stylesheet">
+<style>
+  :root { --band: #F0A3BC; --wine: #3A0B25; --wine-2: #7D4A63; --blush: #FFF0F4; --pink-deep: #C81D5E; --coin: #FFD84D; }
+  * { box-sizing: border-box; }
+  html, body { margin: 0; height: 100%; }
+  body { background: var(--blush); color: var(--wine); font-family: "Bricolage Grotesque", system-ui, sans-serif; display: grid; place-items: center; }
+  .card { width: 1120px; background: var(--band); border-radius: 40px; padding: 56px 64px 52px; }
+  .brand { display: flex; align-items: baseline; gap: 12px; }
+  .brand b { font-size: 44px; font-weight: 800; letter-spacing: -0.015em; font-variation-settings: "opsz" 96, "wdth" 95; }
+  .brand span { font: 900 30px/1 "Noto Sans TC", sans-serif; color: var(--pink-deep); }
+  h1 { margin: 18px 0 0; font-size: 64px; line-height: 1.02; font-weight: 800; letter-spacing: -0.02em; font-variation-settings: "opsz" 96, "wdth" 92; max-width: 16ch; }
+  .links { margin-top: 34px; display: grid; gap: 10px; font-size: 26px; font-weight: 700; }
+  .links small { display: block; font-size: 17px; font-weight: 500; color: var(--wine-2); }
+  .chips { margin-top: 30px; display: flex; flex-wrap: wrap; gap: 10px; }
+  .chips span { background: #fff; border-radius: 999px; padding: 8px 16px; font-size: 18px; font-weight: 600; }
+  .coin { display: inline-block; width: 22px; height: 22px; border-radius: 50%; background: var(--coin); border: 3px solid var(--wine); vertical-align: -3px; margin-right: 10px; }
+</style>
+</head>
+<body>
+  <div class="card">
+    <div class="brand"><b>kindtrail</b><span>善蹤</span></div>
+    <h1>Every donated dollar knows where it went</h1>
+    <div class="links">
+      <div><span class="coin"></span>kindtrail.onrender.com<small>Try the live demo: PayPal sandbox, no real money moves</small></div>
+      <div><span class="coin"></span>github.com/ch996811/kindtrail<small>Open source, MIT license</small></div>
+    </div>
+    <div class="chips">
+      <span>PayPal Orders v2</span><span>JavaScript SDK v6</span><span>Payouts</span><span>Webhooks</span><span>Transaction Search</span><span>Gemini reads receipts and donors' words</span>
+    </div>
+  </div>
+</body>
+</html>

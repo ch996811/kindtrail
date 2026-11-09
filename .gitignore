@@ -24,3 +24,6 @@ Thumbs.db
 
 # local tooling
 .claude/
+
+# demo video build output (audio, recordings, clips)
+tools/demo_video/out/
