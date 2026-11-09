@@ -1,39 +1,39 @@
 {
   "voice": "Sulafat",
-  "style": "warm, calm documentary narrator; clear and unhurried, gently hopeful",
+  "style": "a plain, friendly voice walking a colleague through a product demo; natural pace, conversational, not dramatic",
   "model": "gemini-3.8-flash-tts",
   "scenes": [
     {
       "id": "1-home",
-      "text": "When you give to a small charity and say, only for kids in Hualien, how do you know that promise was kept? Kindtrail makes every donated dollar traceable: from the gift, to the receipt it paid for, to a thank-you that shows exactly what it bought."
+      "text": "Mei lives abroad. After a typhoon in Hualien, she gives fifty dollars to a small relief fund, on one condition: only for kids who lost their homes. Kindtrail checks that condition against every receipt, and shows her what her money bought."
     },
     {
       "id": "2-fund",
-      "text": "It starts with the donor's own words. Gemini turns them into rules: where the money may go, what it may pay for, who it's for, and until when. The donor stays in control and can change any rule, and a live preview shows how real receipts would be judged."
+      "text": "Whoever starts a fund writes the condition as a sentence. Gemini turns it into rules: where the money can be spent, on what, for whom, and until when. Any rule can be changed. Adding medical care re-scores the sample pharmacy receipt right away. Once the fund is saved, every gift to it follows these rules."
     },
     {
       "id": "3-give",
-      "text": "Gifts arrive through PayPal Checkout. Each order carries the fund's tag in its custom ID, so PayPal's own records know which promise every dollar comes with. This demo runs entirely in PayPal's sandbox."
+      "text": "Donors give through PayPal Checkout, in the sandbox. The server creates the order with the fund's code in custom ID, so the tag is stored on PayPal's side too. Here's a test buyer's gift that went all the way through: captured, and confirmed by a verified webhook."
     },
     {
       "id": "4-receipt",
-      "text": "On the ground, a field partner buys tarps, rice and raincoats, then sends a photo of the receipt. Gemini reads every line, with its price and its place on the photo, in a few seconds. Then plain code, not the model, decides what fits. The prepaid gift card works like cash, so donors' money can't pay for it."
+      "text": "In Hualien, a partner kitchen buys tarps, rice and kids' raincoats, and sends a photo of the receipt. Gemini reads each line, its price and where it is on the photo, in a couple of seconds. Then the rule engine decides, line by line. The prepaid gift card counts as cash, so donors' money can't pay for it."
     },
     {
       "id": "5a-review",
-      "text": "At the charity, Lin sees the photo, every verdict with its reason, and which gifts will pay for it, oldest first. One click sends the payout through PayPal Payouts."
+      "text": "At the charity, Lin sees every verdict with its reason, and which gifts will pay for it, oldest first. Approve sends the money to the kitchen with PayPal Payouts."
     },
     {
       "id": "5b-paid",
-      "text": "When PayPal confirms, its webhook arrives with a verified signature, and the coin reaches paid. Nothing moves without a person."
+      "text": "PayPal's webhook confirms the payout. Its signature is checked before the request is marked paid."
     },
     {
       "id": "6-impact",
-      "text": "Then comes the part most charities can't offer: a receipt for each gift. Mei's fifty dollars bought four waterproof tarps and most of the rice. She can see who shared the purchase, the line that broke the rules and never touched her money, and the PayPal transaction that proves it."
+      "text": "Mei gave her fifty dollars in October. Her receipt shows it paid for the four tarps and eighteen dollars of the rice, who shared the rest, the gift card it didn't touch, who approved it, and the PayPal transaction for the payout."
     },
     {
       "id": "7-close",
-      "text": "Kindtrail is built on PayPal Orders, the JavaScript SDK, Payouts, Webhooks and Transaction Search, with Gemini reading receipts and donors' words. Every donated dollar knows where it went."
+      "text": "Kindtrail runs on PayPal Orders, the JavaScript SDK, Payouts, Webhooks and Transaction Search, with Gemini reading the receipts. You can try it at kindtrail dot onrender dot com."
     }
   ]
 }

@@ -23,13 +23,16 @@ OUT = HERE / "out"
 REPO = HERE.parents[1]
 BASE = "https://kindtrail.onrender.com"
 VIEW = {"width": 1280, "height": 720}
-EXAMPLE_WORDS = ("Please use my gift only for kids in Hualien who lost their homes in the typhoon. "
-                 "Not for staff costs. Spend it by the end of the year.")
+# The fund scene types one of these, so the AI reads it live on camera instead of from the cache.
+DONOR_WORDS = [f"Only for kids in Hualien who lost their homes in the typhoon. Not for staff costs. {end}"
+               for end in ("Spend it by the end of the year.", "Use it by the end of the year.",
+                           "Spend it before the year is over.", "Please spend it by December 31.")]
 
 # A visible cursor, since headless recordings don't draw one.
 CURSOR_JS = """
 window.addEventListener('DOMContentLoaded', () => {
   const c = document.createElement('div');
+  c.id = 'kt-cursor';
   Object.assign(c.style, {position: 'fixed', left: '-40px', top: '-40px', width: '22px', height: '22px',
     marginLeft: '-11px', marginTop: '-11px', borderRadius: '50%', background: 'rgba(58,11,37,.88)',
     border: '3px solid #fff', boxShadow: '0 2px 10px rgba(0,0,0,.35)', zIndex: 2147483647,
@@ -69,7 +72,10 @@ class Scene:
             time.sleep(left)
 
     def shot(self, name: str) -> None:
+        """A gallery still, without the recording's cursor dot."""
+        self.page.evaluate("document.getElementById('kt-cursor')?.style.setProperty('visibility', 'hidden')")
         self.page.screenshot(path=str(OUT / "shots" / f"{name}.png"))
+        self.page.evaluate("document.getElementById('kt-cursor')?.style.removeProperty('visibility')")
 
     def finish(self, timings: dict) -> None:
         self.until(audio_seconds(self.name) + 3.0)  # slack in case a line is re-voiced slightly longer
@@ -87,6 +93,11 @@ def glide(page: Page, locator, click: bool = True, steps: int = 28) -> None:
     time.sleep(0.25)
     if click:
         page.mouse.click(x, y)
+
+
+def scroll_to(page: Page, locator, top: int) -> None:
+    """Smooth-scroll so the element sits `top` pixels below the top of the window."""
+    locator.first.evaluate(f"e => window.scrollBy({{top: e.getBoundingClientRect().top - {top}, behavior: 'smooth'}})")
 
 
 def scroll(page: Page, dy: int) -> None:
@@ -147,7 +158,7 @@ def paypal_client():
 def sandbox_order() -> list:
     """Off camera: a real sandbox order created by the live server (as the Give button does), read back from PayPal."""
     gift = httpx.post(BASE + "/api/gifts", timeout=60,
-                      json={"fund_code": "FUND-HUALIEN-KIDS", "donor_name": "Mei L.", "amount_cents": 5000}).json()
+                      json={"fund_code": "FUND-HUALIEN-KIDS", "donor_name": "Ana K.", "amount_cents": 2500}).json()
     order = paypal_client().get_order(gift["order_id"])
     unit = order["purchase_units"][0]
     amount = unit["amount"]
@@ -174,6 +185,21 @@ def webhook_event(request_id: str) -> list:
     raise RuntimeError(f"PayPal has no PAYOUTS-ITEM.SUCCEEDED event for {request_id} yet")
 
 
+def capture_event() -> list | None:
+    """Off camera: PayPal's record of the newest sandbox gift captured for the demo fund (a test buyer's checkout)."""
+    pp = paypal_client()
+    events = pp._call("GET", "/v1/notifications/webhooks-events?page_size=20&event_type=PAYMENT.CAPTURE.COMPLETED").get("events", [])
+    for e in events:
+        r = e["resource"]
+        if r.get("custom_id") == "FUND-HUALIEN-KIDS":
+            print("capture event", e["id"], r["id"], flush=True)
+            return [["event", e["event_type"], False], ["capture", r["id"], False],
+                    ["amount", f"{r['amount']['currency_code']} {r['amount']['value']}  {r['status']}", False],
+                    ["custom_id", r["custom_id"], True]]
+    print("no captured sandbox gift yet", flush=True)
+    return None
+
+
 def warm_ai() -> None:
     """Off camera: one image read first, so the on-camera read is warm (a cold first read took 10.8 s once)."""
     data = fresh_receipt().read_bytes()
@@ -194,7 +220,6 @@ def prepare() -> dict:
             pass
         time.sleep(3)
     api.post("/api/demo/reset")
-    api.post("/api/limits/parse", json={"donor_words": EXAMPLE_WORDS})
     fund = api.get("/api/funds/FUND-HUALIEN-KIDS").json()
     print("available", fund["available_cents"], "gifts", [(g["gift_id"], g["donor"]) for g in fund["gifts"]], flush=True)
     return fund
@@ -204,6 +229,8 @@ def main() -> None:
     for d in ("video", "shots"):
         (OUT / d).mkdir(parents=True, exist_ok=True)
     prepare()
+    if not capture_event():  # the give scene's narration shows a gift that really went through PayPal
+        sys.exit("No captured sandbox gift for FUND-HUALIEN-KIDS yet: complete one checkout on /give first.")
     timings: dict = {}
     with sync_playwright() as p:
         browser = p.chromium.launch(channel="chrome", headless=True)
@@ -211,58 +238,78 @@ def main() -> None:
                                   record_video_dir=str(OUT / "video"), record_video_size=VIEW)
         ctx.add_init_script(CURSOR_JS)
 
-        # 1. Home: the pitch and the coin walking the whole trail.
+        # 1. Home: Mei's condition, and what Kindtrail does with it.
         s = Scene(ctx, "1-home")
         s.page.goto(BASE + "/", wait_until="networkidle")
         s.mark()
-        s.until(3.2)
+        s.until(1.6)
         s.shot("1-home")
+        s.until(4.0)
         glide(s.page, s.page.get_by_role("link", name="Try it in four steps"), click=False)
-        s.until(8.5)
+        s.until(9.6)  # "Kindtrail checks that condition against every receipt"
         scroll(s.page, 560)
-        s.until(13)
         s.finish(timings)
 
-        # 2. A donor's words become rules, with a live preview.
+        # 2. The condition becomes rules; a rule is added; the fund is saved.
         s = Scene(ctx, "2-fund")
         s.page.goto(BASE + "/funds/new", wait_until="networkidle")
         s.mark()
-        s.until(0.8)
-        glide(s.page, s.page.get_by_role("button", name="Kids in Hualien"))
-        s.until(2.4)
+        s.until(0.3)
+        words = s.page.locator("textarea").first
+        glide(s.page, words)
+        words.type(random.choice(DONOR_WORDS), delay=16)
+        s.until(3.0)  # "Gemini turns it into rules"
         glide(s.page, s.page.get_by_role("button", name="Turn my words into rules"))
-        s.page.get_by_text("The rules Kindtrail will enforce").wait_for()
-        s.until(5.6)  # "where the money may go, what it may pay for, who it's for, and until when"
+        s.page.get_by_text("The rules Kindtrail will enforce").wait_for(timeout=60_000)
+        s.until(5.7)  # "where the money can be spent, on what, for whom, and until when"
         scroll(s.page, 330)
-        s.until(9.0)
-        s.shot("2-fund")
-        s.until(12.4)  # "The donor stays in control": the uses and the preview on screen together
+        s.until(9.8)  # "Any rule can be changed."
         scroll(s.page, 150)
-        s.until(14.6)  # "and can change any rule"
-        glide(s.page, s.page.get_by_role("button", name="Remove kids' supplies"))
-        s.until(17.0)  # "and a live preview shows how real receipts would be judged"
+        medical = s.page.get_by_role("button", name="Remove medical care")
+        if medical.count():  # the model already allowed it: take it out so it can be added on camera
+            medical.click()
+        s.until(11.4)  # "Adding medical care re-scores the sample pharmacy receipt right away."
+        add = s.page.get_by_label("Add a use")
+        glide(s.page, add, click=False)
+        add.select_option(label="medical care")
+        s.until(13.0)
         point_at(s.page, s.page.get_by_text("Pharmacy, Hualien"))
+        s.until(13.8)
+        s.shot("2-fund")
+        s.until(15.0)  # "Once the fund is saved, every gift to it follows these rules."
+        name = s.page.get_by_placeholder("e.g. Taitung Flood Families")
+        glide(s.page, name)
+        name.type("Kids in Hualien", delay=30)
+        glide(s.page, s.page.get_by_role("button", name="Create the fund"))
+        s.page.get_by_role("link", name="Give to this fund").wait_for(timeout=20_000)
         s.finish(timings)
 
         order_rows = sandbox_order()
+        capture_rows = capture_event()
 
-        # 3. Giving through PayPal (sandbox).
+        # 3. Giving through PayPal (sandbox): the order PayPal stores, then a test buyer's gift that went through.
         s = Scene(ctx, "3-give")
         s.page.goto(BASE + "/give", wait_until="load")
-        s.page.get_by_role("radio", name="$50").wait_for()
+        s.page.get_by_role("radio", name="$25").wait_for()
         s.mark()
-        s.until(0.6)
-        glide(s.page, s.page.get_by_role("radio", name="$50"))
-        s.until(1.6)
-        name = s.page.get_by_placeholder("Anonymous")
-        glide(s.page, name)
-        name.type("Mei L.", delay=90)
-        s.until(3.0)
+        s.until(0.5)
+        glide(s.page, s.page.get_by_role("radio", name="$25"))
+        s.until(1.3)
+        donor = s.page.get_by_placeholder("Anonymous")
+        glide(s.page, donor)
+        donor.type("Ana K.", delay=80)
+        s.until(2.8)
         glide(s.page, s.page.locator("paypal-button"), click=False)
-        s.until(4.2)  # "Each order carries the fund's tag in its custom ID"
+        s.until(4.3)  # "The server creates the order with the fund's code in custom ID"
         callout(s.page, "Behind the scenes · PayPal sandbox", "The order Kindtrail created, as PayPal stores it", order_rows)
-        s.until(8.0)
-        s.shot("3-give")
+        s.until(9.0)
+        s.shot("3-give-order")
+        if capture_rows:
+            s.until(11.8)  # "Here's a test buyer's gift that went all the way through"
+            callout(s.page, "Behind the scenes · PayPal webhook", "A sandbox test buyer's gift, captured", capture_rows,
+                    "Kindtrail checked this webhook's signature before adding the gift to the fund.")
+            s.until(15.6)
+            s.shot("3-give")
         s.finish(timings)
 
         warm_ai()
@@ -274,33 +321,35 @@ def main() -> None:
         purpose = s.page.locator("#purpose")
         glide(s.page, purpose)
         purpose.fill("")
-        purpose.type("tarps, rice and raincoats for typhoon families", delay=28)
-        s.until(4.2)
+        purpose.type("tarps, rice and raincoats for typhoon families", delay=24)
+        s.until(3.6)
         glide(s.page, s.page.get_by_role("button", name="Choose a photo"), click=False)
         s.page.set_input_files("input[type=file]", str(fresh_receipt()))
-        s.until(6.0)
+        s.until(5.2)
         glide(s.page, s.page.get_by_role("button", name="Check this receipt"))
         s.page.get_by_text("Sent to the charity as").wait_for(timeout=90_000)
         request_id = s.page.get_by_role("heading", name="Sent to the charity as").inner_text().split()[-1]
-        s.until(15)
+        s.until(12.6)
         s.shot("4-receipt")
+        s.until(15.9)  # "The prepaid gift card counts as cash"
         glide(s.page, s.page.get_by_text("Prepaid gift card", exact=False).last, click=False)
         s.finish(timings)
         print("new request", request_id, flush=True)
 
-        # 5a. The charity reviews and approves.
+        # 5a. The charity reviews: verdicts, then which gifts pay; then Approve.
         s = Scene(ctx, "5a-review")
         s.page.goto(f"{BASE}/requests/{request_id}", wait_until="networkidle")
         s.page.get_by_text("What the AI found").wait_for()
         s.mark()
-        s.until(2.8)
+        s.until(0.4)
+        scroll_to(s.page, s.page.get_by_text("What the AI found"), 96)
+        s.until(2.6)
         s.shot("5-review")
-        glide(s.page, s.page.locator("figure button[aria-label*='gift card']"), click=False)
-        s.until(5.0)
-        scroll(s.page, 420)
-        s.until(7.2)
-        scroll(s.page, -420)
-        s.until(8.4)
+        s.until(3.9)  # "and which gifts will pay for it, oldest first"
+        scroll_to(s.page, s.page.get_by_text("Whose dollars"), 96)
+        s.until(5.6)
+        s.shot("5-review-gifts")
+        s.until(7.4)  # "Approve sends the money to the kitchen with PayPal Payouts."
         glide(s.page, s.page.get_by_role("button", name="Approve"))
         s.finish(timings)
 
@@ -314,36 +363,34 @@ def main() -> None:
 
         webhook_rows = webhook_event(request_id)
 
-        # 5b. Paid: the coin reaches "Paid".
+        # 5b. Paid, confirmed by PayPal's webhook.
         s = Scene(ctx, "5b-paid")
         s.page.goto(f"{BASE}/requests/{request_id}", wait_until="networkidle")
         s.page.get_by_role("link", name="Send donor thank-yous").wait_for()
         s.mark()
-        s.until(1.9)  # "its webhook arrives with a verified signature"
+        s.until(0.3)  # "PayPal's webhook confirms the payout."
         callout(s.page, "Behind the scenes · PayPal webhook", "PayPal's notification for this payout", webhook_rows,
                 "Kindtrail checks every delivery with verify-webhook-signature before the ledger changes.", where="top")
-        s.until(5.4)  # "and the coin reaches paid"
+        s.until(3.0)
         s.shot("5-paid")
         point_at(s.page, s.page.get_by_text("Paid", exact=True))
-        s.until(8.1)  # "Nothing moves without a person."
-        glide(s.page, s.page.get_by_role("link", name="Send donor thank-yous"), click=False)
         s.finish(timings)
 
-        # 6. The donor's receipt.
+        # 6. Mei's receipt.
         s = Scene(ctx, "6-impact")
         s.page.goto(f"{BASE}/requests/{request_id}/thanks", wait_until="networkidle")
         s.page.get_by_role("link", name="Open receipt").first.wait_for()
         s.mark()
-        s.until(1.6)
+        s.until(0.3)
         glide(s.page, s.page.get_by_role("link", name="Open receipt").first)
         s.page.get_by_text("paid for").first.wait_for()
-        s.until(6.5)
+        s.until(3.2)
         s.shot("6-impact")
-        s.until(9.5)
+        s.until(7.6)  # "who shared the rest, the gift card it didn't touch"
         scroll(s.page, 430)
-        s.until(14.5)
+        s.until(10.4)  # "who approved it, and the PayPal transaction for the payout"
         scroll(s.page, 430)
-        s.until(18)
+        s.until(12.4)
         s.shot("6-impact-proof")
         s.finish(timings)
 

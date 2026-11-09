@@ -1,0 +1,40 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Kindtrail money flow</title>
+<link href="https://fonts.googleapis.com/css2?family=Bricolage+Grotesque:opsz,wdth,wght@12..96,75..100,400..800&display=swap" rel="stylesheet">
+<style>
+  :root { --band: #F0A3BC; --wine: #3A0B25; --wine-2: #7D4A63; --blush: #FFF0F4; --petal: #FFE0EA; --pink: #F23D7C; --coin: #FFD84D; --mint: #1E8A5F; }
+  * { box-sizing: border-box; }
+  html, body { margin: 0; }
+  body { width: 1500px; height: 1000px; background: var(--blush); color: var(--wine); font-family: "Bricolage Grotesque", system-ui, sans-serif; padding: 52px 64px; }
+  h1 { margin: 0; font-size: 46px; font-weight: 800; letter-spacing: -0.015em; font-variation-settings: "opsz" 96, "wdth" 92; }
+  .sub { margin: 6px 0 26px; font-size: 20px; color: var(--wine-2); }
+  ol { list-style: none; margin: 0; padding: 0; display: grid; gap: 12px; position: relative; }
+  ol::before { content: ""; position: absolute; left: 27px; top: 30px; bottom: 30px; border-left: 4px dotted var(--band); }
+  li { position: relative; display: grid; grid-template-columns: 58px 210px 1fr 330px; align-items: center; gap: 18px; background: #fff; border-radius: 20px; padding: 14px 20px 14px 0; min-height: 96px; }
+  .n { justify-self: center; width: 44px; height: 44px; border-radius: 50%; background: var(--coin); border: 3px solid var(--wine); display: grid; place-items: center; font-weight: 800; font-size: 20px; margin-left: 6px; }
+  .who { font-weight: 800; font-size: 21px; line-height: 1.15; }
+  .who small { display: block; font-weight: 600; font-size: 15px; color: var(--wine-2); }
+  .what { font-size: 19px; line-height: 1.35; }
+  .tech { justify-self: end; text-align: right; font: 600 15px/1.45 Consolas, ui-monospace, monospace; background: var(--petal); border-radius: 12px; padding: 8px 12px; }
+  .pp { color: #0b3a8c; }
+  .ai { color: #6b2a8c; }
+  .rule { color: var(--mint); }
+</style>
+</head>
+<body>
+  <h1>How a gift moves through Kindtrail</h1>
+  <p class="sub">PayPal sandbox and Gemini on one side, Kindtrail's ledger and rule engine in the middle, three people using it.</p>
+  <ol>
+    <li><span class="n">1</span><span class="who">Donor<small>abroad, gives in USD</small></span><span class="what">Gives through PayPal Checkout. The server creates the order with the fund's code in <b>custom_id</b>.</span><span class="tech pp">Orders v2 · JS SDK v6</span></li>
+    <li><span class="n">2</span><span class="who">PayPal<small>to Kindtrail</small></span><span class="what">The capture arrives by webhook. Its signature is checked before the gift enters the ledger, in integer cents.</span><span class="tech pp">Webhooks<br>verify-webhook-signature</span></li>
+    <li><span class="n">3</span><span class="who">Field partner<small>in Hualien</small></span><span class="what">Uploads a receipt photo. Gemini returns each line: quantity, price, spending category and its box on the photo.</span><span class="tech ai">Gemini 3.5 Flash Lite<br>Gemma 4 as fallback</span></li>
+    <li><span class="n">4</span><span class="who">Rule engine<small>code, not the model</small></span><span class="what">Checks every line: category, region, date, a receipt sent twice, currency, totals. Anything it can't confirm isn't paid.</span><span class="tech rule">review.py · 58 tests</span></li>
+    <li><span class="n">5</span><span class="who">Reviewer<small>at the charity</small></span><span class="what">Sees each verdict and its reason. Approve allocates gifts oldest first and pays the partner; Send back pays nothing.</span><span class="tech pp">Payouts<br>sender_item_id = request</span></li>
+    <li><span class="n">6</span><span class="who">PayPal<small>to Kindtrail</small></span><span class="what">The payout is confirmed by a signature-verified webhook, and the request is marked paid.</span><span class="tech pp">PAYMENT.PAYOUTS-ITEM<br>.SUCCEEDED</span></li>
+    <li><span class="n">7</span><span class="who">Donor<small>gets a receipt</small></span><span class="what">Lists the lines their gift paid for, the line the rules refused and the payout's PayPal transaction ID.</span><span class="tech pp">Transaction Search<br>reconciles the ledger</span></li>
+  </ol>
+</body>
+</html>
