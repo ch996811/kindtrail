@@ -289,7 +289,8 @@ def apply_payout_batch(conn: sqlite3.Connection, request_id: str, batch: dict[st
         conn.execute("DELETE FROM allocations WHERE request_id = ?", (request_id,))
         conn.execute("UPDATE requests SET status = 'reviewed', approved_by = NULL, approved_at = NULL "
                      "WHERE id = ? AND status IN ('paying', 'paid')", (request_id,))
-    elif batch_status == "SUCCESS" and item_status in (None, "SUCCESS"):
+    elif item_status == "SUCCESS" or (item_status is None and batch_status == "SUCCESS"):
+        # The item's own SUCCESS means the partner has the money, even while the batch still says PROCESSING.
         conn.execute("UPDATE requests SET status = 'paid' WHERE id = ? AND status = 'paying'", (request_id,))
 
 

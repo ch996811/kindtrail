@@ -194,6 +194,16 @@ def test_a_failed_payout_frees_the_gifts_and_can_be_approved_again(client, fake_
     assert client.post("/api/requests/KT-0142/refresh").json()["status"] == "paid"
 
 
+def test_a_payment_that_succeeded_counts_as_paid_while_the_batch_is_still_processing(client, conn):
+    from app import service
+
+    give(client, 8000)
+    client.post("/api/requests/KT-0142/approve")
+    service.apply_payout_batch(conn, "KT-0142", {"batch_header": {"batch_status": "PROCESSING"}, "items": [
+        {"transaction_status": "SUCCESS", "transaction_id": "TXN-1", "payout_item": {"sender_item_id": "KT-0142"}}]})
+    assert client.get("/api/requests/KT-0142").json()["status"] == "paid"
+
+
 def payout_event(event_id, batch_id, status, request_id="KT-0142"):
     return {"id": event_id, "event_type": f"PAYMENT.PAYOUTS-ITEM.{'SUCCEEDED' if status == 'SUCCESS' else status}",
             "resource": {"payout_item_id": f"ITEM-{event_id}", "payout_batch_id": batch_id, "transaction_id": f"TXN-{event_id}",
