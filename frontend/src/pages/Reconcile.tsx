@@ -155,8 +155,9 @@ export function Reconcile() {
               PayPal&rsquo;s report is current to {when(d.refreshed_at) || 'an unknown time'}. Checked {when(d.checked_at)}.{' '}
               <button type="button" onClick={() => q.refetch()} disabled={q.isFetching} className="font-bold text-wine underline disabled:opacity-60">
                 {q.isFetching ? 'Checking...' : 'Check again'}
-              </button>{' '}
-              <Link to="/requests" className="font-bold text-wine">
+              </button>
+              <span aria-hidden="true" className="mx-2 text-wine-2">·</span>
+              <Link to="/requests" className="font-bold text-wine underline">
                 Back to the requests
               </Link>
             </p>
