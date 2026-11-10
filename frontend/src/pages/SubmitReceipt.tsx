@@ -186,14 +186,19 @@ function Dropzone({ onPick }: { onPick: (f: File) => void }) {
           <circle cx="40" cy="42" r="10" className="fill-pink" />
           <path d="M40 37v10M35 42h10" stroke="white" strokeWidth="2.5" strokeLinecap="round" />
         </svg>
-        <p className="mt-4 mb-1 text-lg font-bold">Drop a photo of the receipt here</p>
+        {/* On a phone, partners photograph the receipt where they bought things; there's nothing to drop. */}
+        <p className="mt-4 mb-1 text-lg font-bold">
+          <span className="pointer-coarse:hidden">Drop a photo of the receipt here</span>
+          <span className="hidden pointer-coarse:inline">Take a photo of the receipt</span>
+        </p>
         <p className="m-0 text-[15px] text-wine-2">JPEG, PNG or WebP, up to 6 MB</p>
         <button
           type="button"
           onClick={() => input.current?.click()}
           className="mt-5 rounded-[14px] bg-wine px-[18px] py-3 font-bold text-white"
         >
-          Choose a photo
+          <span className="pointer-coarse:hidden">Choose a photo</span>
+          <span className="hidden pointer-coarse:inline">Take a photo</span>
         </button>
         <input
           ref={input}

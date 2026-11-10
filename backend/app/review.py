@@ -108,6 +108,7 @@ class Line:
     box: list[int] | None
     verdict: str = "fits"
     reason: str = ""
+    problem: str = ""  # why this line's own numbers can't be trusted; such a line is never paid
 
 
 @dataclass
@@ -143,15 +144,57 @@ def _region_matches(shop_region: str, fund_region: str) -> bool:
     return any(s == f for s in shop for f in fund)
 
 
+def _number(x: Any) -> float:
+    if isinstance(x, bool) or x is None:
+        raise ValueError("not a number")
+    return float(x)
+
+
+def _box(value: Any) -> list[int] | None:
+    ok = (isinstance(value, list) and len(value) == 4
+          and all(isinstance(v, (int, float)) and not isinstance(v, bool) and 0 <= v <= 1000 for v in value))
+    return [int(v) for v in value] if ok else None
+
+
+def _read_lines(items: Any) -> tuple[list[Line], list[int]]:
+    """The model's purchase lines, checked one by one. Returns the lines and the numbers of any that couldn't be
+    read at all (a missing or non-numeric field): those make the whole reading untrustworthy."""
+    lines: list[Line] = []
+    unreadable: list[int] = []
+    for n, i in enumerate(items if isinstance(items, list) else [], 1):
+        try:
+            qty, unit, total = _number(i["qty"]), _cents(_number(i["unit_price"])), _cents(_number(i["line_total"]))
+            text = str(i.get("receipt_text") or "").strip()
+            label = str(i.get("label") or "").strip() or text
+            if not label:
+                raise ValueError("no name")
+        except (KeyError, TypeError, ValueError, AttributeError):
+            unreadable.append(n)
+            continue
+        whole = qty == int(qty)
+        line = Line(receipt_text=text or label, label=label, qty=int(qty) if whole and qty > 0 else 0, unit_cents=unit,
+                    line_cents=total, category=i.get("category") if i.get("category") in CATEGORIES else "other",
+                    box=_box(i.get("box_2d")))
+        if not whole or qty < 1:
+            line.problem = f"The quantity reads as {qty:g}, which can't be paid as it is. A person has to check the photo."
+        elif abs(line.qty * unit - total) > 1:
+            line.problem = (f"{line.qty} x {unit / 100:.2f} doesn't make the line total of {total / 100:.2f}, so the AI "
+                            "may have misread this line. A person has to check the photo.")
+        lines.append(line)
+    return lines, unreadable
+
+
 def judge(receipt: dict[str, Any], policy: dict[str, Any], *, duplicate_of: str | None = None) -> Review:
-    shop = receipt.get("shop") or {}
-    lines = [
-        Line(receipt_text=i["receipt_text"], label=i["label"], qty=int(i["qty"]), unit_cents=_cents(i["unit_price"]),
-             line_cents=_cents(i["line_total"]), category=i["category"] if i["category"] in CATEGORIES else "other",
-             box=i.get("box_2d") if isinstance(i.get("box_2d"), list) and len(i["box_2d"]) == 4 else None)
-        for i in receipt.get("items", [])
-    ]
-    review = Review(lines=lines, shop=shop, receipt_total_cents=_cents(receipt.get("total") or 0))
+    """Decide every line. The model's answer is only trusted as far as it checks out: anything missing, negative or
+    inconsistent blocks payment instead of slipping through."""
+    receipt = receipt if isinstance(receipt, dict) else {"readable": False}
+    shop = receipt.get("shop") if isinstance(receipt.get("shop"), dict) else {}
+    lines, unreadable = _read_lines(receipt.get("items"))
+    try:
+        total_cents = _cents(_number(receipt.get("total")))
+    except (TypeError, ValueError):
+        total_cents = 0
+    review = Review(lines=lines, shop=shop, receipt_total_cents=total_cents)
 
     # Receipt-wide problems block every line. When the model can't tell us something a limit depends on,
     # nothing is paid: a person has to look.
@@ -165,6 +208,15 @@ def judge(receipt: dict[str, Any], policy: dict[str, Any], *, duplicate_of: str 
     if not receipt.get("readable", True):
         block("unreadable", "The photo isn't a readable receipt. Ask the partner for a clearer one.")
         return _verdicts(review, policy, block_all)
+    if unreadable:
+        which = ", ".join(str(n) for n in unreadable)
+        block("incomplete", f"The AI's reading of {'line' if len(unreadable) == 1 else 'lines'} {which} came back "
+                            "incomplete, so nothing is paid. Ask the partner for a clearer photo.")
+    elif not lines:
+        block("incomplete", "The AI found no purchases on this receipt, so there is nothing it can pay.")
+    if any(ln.unit_cents < 0 or ln.line_cents < 0 for ln in lines):
+        block("discount", "This receipt has a discount or refund line. Kindtrail can't spread a discount across "
+                          "the other lines yet, so nothing is paid until a person handles it.")
 
     if duplicate_of:
         block("duplicate", f"This receipt was already submitted with request {duplicate_of}.")
@@ -186,17 +238,26 @@ def judge(receipt: dict[str, Any], policy: dict[str, Any], *, duplicate_of: str 
         except ValueError:
             block("expired", f"The AI couldn't read the purchase date, so the end date ({until}) can't be checked.")
 
-    # Arithmetic checks catch misreads; they don't decide anything but the reviewer should look.
+    # Arithmetic catches misreads. A line whose own numbers disagree is never paid; lines that claim more than the
+    # receipt's total block everything. Lines that come to less (tax, say) are only paid as listed.
     for ln in lines:
-        if abs(ln.qty * ln.unit_cents - ln.line_cents) > 1:
+        if ln.problem:
             review.flags.append({"kind": "math", "severity": "check",
-                                 "message": f"{ln.receipt_text}: {ln.qty} x {ln.unit_cents / 100:.2f} "
-                                            f"doesn't equal {ln.line_cents / 100:.2f}. Check the photo."})
-    lines_sum = sum(ln.line_cents for ln in lines)
-    if lines and review.receipt_total_cents and abs(lines_sum - review.receipt_total_cents) > 1:
+                                 "message": f"{ln.receipt_text}: the quantity and prices don't agree, so this line "
+                                            "isn't paid. Check the photo."})
+    lines_sum, total = sum(ln.line_cents for ln in lines), review.receipt_total_cents
+    if lines and total > 0 and lines_sum > total + 1:
+        block("total", f"The lines add up to {lines_sum / 100:.2f}, more than the receipt's total of {total / 100:.2f}, "
+                       "so the AI may have misread a line. Nothing is paid until a person checks the photo.")
+    elif lines and total > 0 and lines_sum < total - 1:
         review.flags.append({"kind": "math", "severity": "check",
-                             "message": f"The lines add up to {lines_sum / 100:.2f} but the receipt total "
-                                        f"is {review.receipt_total_cents / 100:.2f}. Check the photo."})
+                             "message": f"The lines add up to {lines_sum / 100:.2f} but the receipt's total is "
+                                        f"{total / 100:.2f} (tax, or a line the AI missed). Only the lines listed "
+                                        "can be paid."})
+    elif lines and total <= 0:
+        review.flags.append({"kind": "math", "severity": "check",
+                             "message": "The AI couldn't read the receipt's total, so the lines weren't checked "
+                                        "against it. Check the photo."})
     return _verdicts(review, policy, block_all)
 
 
@@ -209,6 +270,8 @@ def _verdicts(review: Review, policy: dict[str, Any], block_all: str | None) -> 
         if ln.category in never:  # the item's own problem says more than a receipt-wide one
             ln.verdict = "blocked"
             ln.reason = NEVER_REASON.get(ln.category, f"Donors ruled out {LABELS[ln.category]}.")
+        elif ln.problem:
+            ln.verdict, ln.reason = "blocked", ln.problem
         elif block_all:
             ln.verdict, ln.reason = "blocked", block_all
         elif ln.category in allowed:

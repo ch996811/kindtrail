@@ -61,13 +61,60 @@ def test_resubmitted_receipt_is_blocked():
     assert r.flags[0]["kind"] == "duplicate"
 
 
-def test_arithmetic_misreads_are_flagged_for_a_human():
-    data = receipt(("Rice", 2, 12.0, "food"), total=30.0)
-    data["items"][0]["line_total"] = 25.0
+def test_a_line_whose_numbers_disagree_is_never_paid():
+    # Read as 500 tarps at 19.40 while the line total says 77.60: paying qty x price would send 9,700.
+    data = receipt(("Tarp", 4, 19.40, "shelter"), ("Rice", 2, 9.0, "food"))
+    data["items"][0]["qty"] = 500
     r = judge(data, POLICY)
-    kinds = [f["kind"] for f in r.flags]
-    assert kinds == ["math", "math"]
-    assert all(f["severity"] == "check" for f in r.flags)
+    assert verdicts(r) == [("Tarp", "blocked"), ("Rice", "fits")]
+    assert "doesn't make the line total" in r.lines[0].reason
+    assert [f["kind"] for f in r.flags] == ["math"]
+
+
+def test_lines_that_claim_more_than_the_receipt_total_block_everything():
+    r = judge(receipt(("Rice", 2, 12.0, "food"), total=20.0), POLICY)
+    assert verdicts(r) == [("Rice", "blocked")] and r.flags[0]["kind"] == "total"
+
+
+def test_lines_that_come_to_less_than_the_total_are_paid_as_listed():
+    r = judge(receipt(("Rice", 2, 12.0, "food"), total=25.5), POLICY)  # tax, say
+    assert verdicts(r) == [("Rice", "fits")]
+    assert [(f["kind"], f["severity"]) for f in r.flags] == [("math", "check")]
+
+
+def test_a_malformed_answer_from_the_model_pays_nothing_and_never_crashes():
+    data = receipt(("Tarp", 4, 8.0, "shelter"), ("Rice", 2, 9.0, "food"))
+    del data["items"][1]["unit_price"]
+    r = judge(data, POLICY)
+    assert verdicts(r) == [("Tarp", "blocked")] and r.flags[0]["kind"] == "incomplete"
+
+    data = receipt(("Tarp", 4, 8.0, "shelter"))
+    data["items"][0].update(qty="four", box_2d=[1, 2, 3, 9999])
+    assert judge(data, POLICY).flags[0]["kind"] == "incomplete"
+
+    data = receipt(("Tarp", 4, 8.0, "shelter"))
+    data["items"][0]["box_2d"] = [1, 2, 3, 9999]
+    assert judge(data, POLICY).lines[0].box is None  # off the photo: no box rather than a wrong one
+
+    for answer in ([], "text", {"readable": True, "items": "none", "shop": "?"}, {"readable": True, "items": []}):
+        r = judge(answer, POLICY)
+        assert r.flags[0]["severity"] == "block" and all(ln.verdict == "blocked" for ln in r.lines)
+
+
+def test_fractional_or_zero_quantities_are_not_paid():
+    data = receipt(("Rice", 1, 4.0, "food"), ("Water", 1, 2.0, "water"))
+    data["items"][0].update(qty=1.5, line_total=6.0)
+    data["items"][1].update(qty=0, line_total=0.0)
+    data["total"] = 6.0
+    r = judge(data, POLICY)
+    assert verdicts(r) == [("Rice", "blocked"), ("Water", "blocked")]
+    assert "quantity reads as 1.5" in r.lines[0].reason
+
+
+def test_a_discount_line_blocks_the_receipt():
+    r = judge(receipt(("Tarp", 4, 8.0, "shelter"), ("Member discount", 1, -2.0, "other")), POLICY)
+    assert all(ln.verdict == "blocked" for ln in r.lines)
+    assert any(f["kind"] == "discount" for f in r.flags)
 
 
 def test_unreadable_photo_is_flagged():

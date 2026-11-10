@@ -2,6 +2,8 @@ from pathlib import Path
 
 from conftest import PARTNER_EMAIL
 
+from app.paypal import PayPalError, PayPalUnreachable
+
 FUND = "FUND-HUALIEN-KIDS"
 
 
@@ -42,11 +44,11 @@ def test_one_gift_one_payout_and_the_ledger_balances(client, fake_paypal):
     assert (fund["received_cents"], fund["spent_cents"], fund["available_cents"]) == (8000, 7760, 240)
 
     fake_paypal.transactions = [
-        {"transaction_id": gift["paypal_capture_id"], "transaction_amount": {"value": "80.00"}},
-        {"transaction_id": "TXN-BATCH-1", "transaction_amount": {"value": "-77.60"}},
+        {"transaction_id": gift["paypal_capture_id"], "transaction_event_code": "T0006", "transaction_amount": {"value": "80.00"}},
+        {"transaction_id": "TXN-BATCH-1", "transaction_event_code": "T0001", "transaction_amount": {"value": "-77.60"}},
     ]
     rec = client.get("/api/reconcile").json()
-    assert rec["balanced"] is True and len(rec["matched"]) == 2
+    assert rec["balanced"] is True and rec["summary"]["matched"] == 2
 
 
 def test_fifo_across_several_donors(client):
@@ -108,15 +110,96 @@ def test_webhook_redelivery_is_ignored_and_unverified_events_change_nothing(clie
              "resource": {"id": "CAP-W", "amount": {"currency_code": "USD", "value": "25.00"},
                           "supplementary_data": {"related_ids": {"order_id": order_id}}}}
 
+    # Not verified: refused with a 4xx so PayPal delivers it again, and not stored.
     fake_paypal.verify_result = False
-    assert client.post("/api/webhooks/paypal", json=event).json()["result"] == "stored-unverified"
+    r = client.post("/api/webhooks/paypal", json=event)
+    assert r.status_code == 400 and r.json()["result"] == "unverified"
+    assert conn.execute("SELECT COUNT(*) FROM webhook_events").fetchone()[0] == 0
     assert conn.execute("SELECT status FROM gifts WHERE paypal_order_id = ?", (order_id,)).fetchone()[0] == "created"
 
+    # The same event, delivered again and verified this time, still counts; after that it's a duplicate.
     fake_paypal.verify_result = True
-    event2 = {**event, "id": "WH-2"}
-    assert client.post("/api/webhooks/paypal", json=event2).json()["result"] == "gift-captured"
-    assert client.post("/api/webhooks/paypal", json=event2).json()["result"] == "duplicate"
+    assert client.post("/api/webhooks/paypal", json=event).json()["result"] == "gift-captured"
+    assert client.post("/api/webhooks/paypal", json=event).json()["result"] == "duplicate"
     assert conn.execute("SELECT status FROM gifts WHERE paypal_order_id = ?", (order_id,)).fetchone()[0] == "captured"
+
+
+def test_webhook_verification_outage_asks_paypal_to_retry(client, fake_paypal, conn):
+    def down(**_):
+        raise PayPalError(503, {"name": "SERVICE_UNAVAILABLE", "message": "Service Unavailable."})
+
+    fake_paypal.verify_webhook = down
+    r = client.post("/api/webhooks/paypal", json={"id": "WH-9", "event_type": "PAYMENT.CAPTURE.COMPLETED", "resource": {}})
+    assert r.status_code == 503
+    assert conn.execute("SELECT COUNT(*) FROM webhook_events").fetchone()[0] == 0
+
+
+# Payouts that don't go simply ----------------------------------------------------------------
+
+def test_no_answer_from_paypal_keeps_the_approval_and_asking_again_never_pays_twice(client, fake_paypal, conn):
+    give(client, 8000)
+    # PayPal made the batch, but the answer never arrived (a timeout).
+    fake_paypal.payout_error, fake_paypal.error_after_sending = PayPalUnreachable(TimeoutError("read timed out")), True
+    r = client.post("/api/requests/KT-0142/approve")
+    assert r.status_code == 200
+    detail = r.json()
+    assert detail["status"] == "paying" and detail["payout"]["status"] == "NO_ANSWER"
+    assert conn.execute("SELECT COUNT(*) FROM allocations").fetchone()[0] == 1  # the gift stays committed
+
+    # The next refresh asks again with the same sender_batch_id; PayPal points to the batch it already made.
+    after = client.post("/api/requests/KT-0142/refresh").json()
+    assert len(fake_paypal.payouts) == 1
+    assert after["status"] == "paid" and after["payout"]["transaction_id"] == "TXN-BATCH-1"
+
+
+def test_a_paypal_server_error_before_sending_is_retried_once_it_answers(client, fake_paypal):
+    give(client, 8000)
+    fake_paypal.payout_error = PayPalError(503, {"name": "SERVICE_UNAVAILABLE", "message": "Service Unavailable."})
+    assert client.post("/api/requests/KT-0142/approve").json()["payout"]["status"] == "NO_ANSWER"
+    assert fake_paypal.payouts == []
+    assert client.post("/api/requests/KT-0142/refresh").json()["payout"]["status"] == "PENDING"
+    assert len(fake_paypal.payouts) == 1
+    assert client.post("/api/requests/KT-0142/refresh").json()["status"] == "paid"
+    assert client.post("/api/requests/KT-0142/refresh").json()["status"] == "paid"
+    assert len(fake_paypal.payouts) == 1
+
+
+def test_a_failed_payout_frees_the_gifts_and_can_be_approved_again(client, fake_paypal, conn):
+    give(client, 8000)
+    client.post("/api/requests/KT-0142/approve")
+    fake_paypal.item_status = "FAILED"
+    fake_paypal.item_errors = {"name": "RECEIVER_UNREGISTERED", "message": "Receiver is unregistered"}
+    failed = client.post("/api/requests/KT-0142/refresh").json()
+    assert failed["status"] == "reviewed" and failed["approved_by"] is None
+    assert (failed["payout"]["status"], failed["payout"]["failure"]) == ("FAILED", "Receiver is unregistered")
+    assert conn.execute("SELECT COUNT(*) FROM allocations").fetchone()[0] == 0
+    assert client.get(f"/api/funds/{FUND}").json()["available_cents"] == 8000
+    assert failed["checks"]["month_spent_cents"] == 0
+
+    fake_paypal.item_status, fake_paypal.item_errors = "SUCCESS", None
+    again = client.post("/api/requests/KT-0142/approve").json()
+    assert again["status"] == "paying" and len(fake_paypal.payouts) == 2
+    assert fake_paypal.payouts[0]["sender_batch_id"] != fake_paypal.payouts[1]["sender_batch_id"]
+    assert client.post("/api/requests/KT-0142/refresh").json()["status"] == "paid"
+
+
+def payout_event(event_id, batch_id, status, request_id="KT-0142"):
+    return {"id": event_id, "event_type": f"PAYMENT.PAYOUTS-ITEM.{'SUCCEEDED' if status == 'SUCCESS' else status}",
+            "resource": {"payout_item_id": f"ITEM-{event_id}", "payout_batch_id": batch_id, "transaction_id": f"TXN-{event_id}",
+                         "transaction_status": status, "payout_item": {"sender_item_id": request_id}}}
+
+
+def test_payout_webhooks_only_touch_the_batch_they_are_about(client, fake_paypal, conn):
+    give(client, 8000)
+    client.post("/api/requests/KT-0142/approve")
+    # An event for an older KT-0142 batch (request ids start again after a demo reset) changes nothing.
+    assert client.post("/api/webhooks/paypal", json=payout_event("WH-OLD", "BATCH-OLD", "RETURNED")).json()["result"] == "ignored"
+    assert client.get("/api/requests/KT-0142").json()["status"] == "paying"
+    # The current batch coming back returned frees the gifts.
+    assert client.post("/api/webhooks/paypal", json=payout_event("WH-NOW", "BATCH-1", "RETURNED")).json()["result"] == "payout-updated"
+    detail = client.get("/api/requests/KT-0142").json()
+    assert detail["status"] == "reviewed" and detail["payout"]["status"] == "RETURNED"
+    assert conn.execute("SELECT COUNT(*) FROM allocations").fetchone()[0] == 0
 
 
 # AI review through the API ------------------------------------------------------------------
@@ -335,6 +418,40 @@ def test_demo_mode_seeds_gifts_and_reset_lets_the_demo_run_again(conn, fake_payp
         assert again["status"] == "reviewed" and again["payout"] is None
         assert c.get(f"/api/funds/{FUND}").json()["available_cents"] == 9500
         assert c.post("/api/requests/KT-0142/approve").status_code == 200
+
+
+def test_reconcile_keeps_payouts_a_demo_reset_cleared(conn, fake_paypal, llm, tmp_path):
+    from fastapi.testclient import TestClient
+
+    from app.config import Settings
+    from app.main import create_app
+
+    settings = Settings(paypal_env="sandbox", paypal_client_id="x", paypal_client_secret="y", paypal_webhook_id="",
+                        partner_email=PARTNER_EMAIL, llm_provider="replay", gemini_api_key="", llm_daily_cap=5,
+                        demo_mode=True, db_path=":memory:", frontend_dist=str(tmp_path / "none"))
+    with TestClient(create_app(settings, paypal=fake_paypal, conn=conn, llm=llm)) as c:
+        c.post("/api/requests/KT-0142/approve")
+        c.post("/api/requests/KT-0142/refresh")
+        c.post("/api/demo/reset")
+        # PayPal's report, a few hours later: the payout as a hold, the payment and the hold's release.
+        fake_paypal.refreshed_at = "2099-01-01T00:00:00Z"
+        fake_paypal.transactions = [
+            {"transaction_id": "HOLD-1", "transaction_event_code": "T1503", "transaction_amount": {"value": "-79.15"},
+             "transaction_initiation_date": "2098-12-31T10:00:00Z", "transaction_status": "S"},
+            {"transaction_id": "TXN-BATCH-1", "transaction_event_code": "T0001", "transaction_amount": {"value": "-77.60"},
+             "fee_amount": {"value": "-1.55"}, "paypal_reference_id": "HOLD-1", "custom_field": "KT-0142",
+             "transaction_initiation_date": "2098-12-31T10:00:08Z", "transaction_status": "S"},
+            {"transaction_id": "REL-1", "transaction_event_code": "T1105", "transaction_amount": {"value": "79.15"},
+             "paypal_reference_id": "HOLD-1", "custom_field": "KT-0142",
+             "transaction_initiation_date": "2098-12-31T10:00:08Z", "transaction_status": "S"},
+        ]
+        rec = c.get("/api/reconcile").json()
+    [payout] = [r for r in rec["rows"] if r["kind"] == "payout"]
+    assert payout["earlier"] is True and payout["state"] == "matched"
+    assert (payout["paypal"]["cents"], payout["paypal"]["fee_cents"]) == (-7760, -155)
+    assert sorted(r["event_code"] for r in payout["paypal"]["related"]) == ["T1105", "T1503"]
+    assert rec["paypal_only"] == []
+    assert rec["summary"] == {"matched": 1, "waiting": 0, "not_paypal": 3, "failed": 0, "to_check": 0}
 
 
 def test_head_requests_on_pages_are_answered(conn, fake_paypal, llm, tmp_path):

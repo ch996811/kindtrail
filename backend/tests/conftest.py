@@ -26,7 +26,13 @@ class FakePayPal:
         self.fail_payout = False
         self.capture_override: dict | None = None
         self.transactions: list[dict] = []
+        self.refreshed_at: str | None = None
         self.verify_result = True
+        self.batches: dict[str, str] = {}  # sender_batch_id -> payout_batch_id
+        self.payout_error: Exception | None = None  # raised once by the next create_payout
+        self.error_after_sending = False  # ...after PayPal made the batch (the answer got lost), or before
+        self.item_status = "SUCCESS"
+        self.item_errors: dict | None = None
 
     def create_donation_order(self, *, fund_code, fund_name, amount_cents, request_id):
         oid = f"ORDER-{next(self.ids)}"
@@ -44,19 +50,32 @@ class FakePayPal:
     def create_payout(self, **kwargs):
         if self.fail_payout:
             raise PayPalError(422, {"name": "INSUFFICIENT_FUNDS", "message": "Sender does not have sufficient funds."})
+        if kwargs["sender_batch_id"] in self.batches:
+            # PayPal refuses a second batch with the same sender_batch_id; PayPalClient returns the first one.
+            return self.get_payout_batch(self.batches[kwargs["sender_batch_id"]])
+        error, self.payout_error = self.payout_error, None
+        if error and not self.error_after_sending:
+            raise error
         self.payouts.append(kwargs)
-        return {"batch_header": {"payout_batch_id": f"BATCH-{len(self.payouts)}", "batch_status": "PENDING"}}
+        batch_id = f"BATCH-{len(self.payouts)}"
+        self.batches[kwargs["sender_batch_id"]] = batch_id
+        if error:
+            raise error
+        return {"batch_header": {"payout_batch_id": batch_id, "batch_status": "PENDING"}}
 
     def get_payout_batch(self, payout_batch_id):
         p = self.payouts[int(payout_batch_id.split("-")[1]) - 1]
+        item = {"transaction_id": f"TXN-{payout_batch_id}", "transaction_status": self.item_status,
+                "payout_batch_id": payout_batch_id, "payout_item_fee": {"currency": "USD", "value": "0.15"},
+                "payout_item": {"sender_item_id": p["sender_item_id"]}}
+        if self.item_errors:
+            item["errors"] = self.item_errors
         return {"batch_header": {"payout_batch_id": payout_batch_id, "batch_status": "SUCCESS",
                                  "fees": {"currency": "USD", "value": "0.15"}},
-                "items": [{"transaction_id": f"TXN-{payout_batch_id}", "transaction_status": "SUCCESS",
-                           "payout_item_fee": {"currency": "USD", "value": "0.15"},
-                           "payout_item": {"sender_item_id": p["sender_item_id"]}}]}
+                "items": [item]}
 
     def search_transactions(self, start, end):
-        return self.transactions
+        return self.transactions, self.refreshed_at
 
     def verify_webhook(self, *, webhook_id, headers, event):
         return self.verify_result

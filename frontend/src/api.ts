@@ -21,7 +21,7 @@ export interface RequestDetail {
   funding: { gift_id: number; donor: string; date: string; given_cents: number; used_here_cents: number; left_cents: number }[]
   shortfall_cents: number
   checks: { month_spent_cents: number; month_cap_cents: number }
-  payout: { status: string; amount_cents: number; fee_cents: number | null; transaction_id: string | null } | null
+  payout: { status: string; amount_cents: number; fee_cents: number | null; transaction_id: string | null; failure: string | null } | null
 }
 
 export class ApiError extends Error {
@@ -165,6 +165,53 @@ export async function submitReceipt(form: { fundCode: string; partnerId: string;
 export const approveRequest = (id: string, approver: string) => call<RequestDetail>('POST', `/api/requests/${id}/approve`, { approver })
 export const refreshRequest = (id: string) => call<RequestDetail>('POST', `/api/requests/${id}/refresh`)
 export const sendBackRequest = (id: string) => call<RequestDetail>('POST', `/api/requests/${id}/send-back`)
+
+export interface PayPalRow {
+  transaction_id: string
+  event_code: string
+  event: string
+  cents: number
+  fee_cents: number
+  at: string | null
+  custom_field: string | null
+  status: string | null
+}
+
+export type MatchState = 'matched' | 'waiting' | 'not_paypal' | 'failed' | 'mismatch' | 'missing'
+
+/** The ledger next to PayPal's Transaction Search report. Amounts are signed: money in is positive. */
+export interface Reconciliation {
+  rows: {
+    kind: 'gift' | 'payout'
+    ref: string
+    label: string
+    at: string | null
+    transaction_id: string | null
+    ours_cents: number
+    source: 'paypal' | 'seed'
+    status: string | null
+    earlier: boolean
+    state: MatchState
+    detail: string
+    paypal: (PayPalRow & { related: PayPalRow[] }) | null
+  }[]
+  paypal_only: {
+    kind: 'gift' | 'payout' | 'account'
+    label: string
+    at: string | null
+    before_ledger: boolean
+    attention: boolean
+    net_cents: number
+    rows: PayPalRow[]
+  }[]
+  summary: { matched: number; waiting: number; not_paypal: number; failed: number; to_check: number }
+  balanced: boolean
+  refreshed_at: string | null
+  ledger_started_at: string | null
+  checked_at: string
+}
+
+export const getReconciliation = () => call<Reconciliation>('GET', '/api/reconcile')
 
 const TONES: Gift['tone'][] = ['pink', 'sun', 'mint']
 const shortDate = (iso: string) => new Date(iso).toLocaleDateString('en-US', { month: 'short', day: 'numeric' })

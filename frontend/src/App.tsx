@@ -13,6 +13,7 @@ const StartFund = lazy(() => import('./pages/StartFund').then((m) => ({ default:
 const ThankYous = lazy(() => import('./pages/ThankYous').then((m) => ({ default: m.ThankYous })))
 const ImpactReceipt = lazy(() => import('./pages/ImpactReceipt').then((m) => ({ default: m.ImpactReceipt })))
 const Give = lazy(() => import('./pages/Give').then((m) => ({ default: m.Give })))
+const Reconcile = lazy(() => import('./pages/Reconcile').then((m) => ({ default: m.Reconcile })))
 
 const queryClient = new QueryClient({ defaultOptions: { queries: { retry: 1, refetchOnWindowFocus: false } } })
 
@@ -51,6 +52,7 @@ export default function App() {
               <Route path="/requests/:id/thanks" element={<ThankYous />} />
               <Route path="/gifts/:id" element={<ImpactReceipt />} />
               <Route path="/give" element={<Give />} />
+              <Route path="/reconcile" element={<Reconcile />} />
               <Route path="*" element={<NotFound />} />
             </Routes>
           </Suspense>

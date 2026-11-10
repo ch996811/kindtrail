@@ -25,31 +25,61 @@ def test_fifo_refuses_when_the_fund_cannot_cover_it():
     assert e.value.needed_cents == 7760
 
 
-def txn(tid, value, **extra):
-    return {"transaction_id": tid, "transaction_amount": {"currency_code": "USD", "value": value},
-            "transaction_status": "S", **extra}
+def txn(tid, value, code="T0006", at="2026-11-09T09:00:00Z", **extra):
+    return {"transaction_id": tid, "transaction_event_code": code, "transaction_amount": {"currency_code": "USD", "value": value},
+            "transaction_status": "S", "transaction_initiation_date": at, **extra}
 
 
-def test_reconcile_matches_by_transaction_id_with_signed_amounts():
-    gifts = [{"gift_id": 1, "capture_id": "CAP1", "amount_cents": 8000, "fund_code": "F"}]
-    payouts = [{"request_id": "KT-1", "transaction_id": "PAY1", "amount_cents": 7760}]
-    result = reconcile(gifts, payouts, [txn("CAP1", "80.00"), txn("PAY1", "-77.60")])
+def entry(kind, ref, txn_id, cents, at="2026-11-09T08:00:00Z", source="paypal", status="SUCCESS"):
+    return {"kind": kind, "ref": ref, "label": ref, "at": at, "transaction_id": txn_id, "ours_cents": cents,
+            "source": source, "status": status, "earlier": False}
+
+
+STARTED = "2026-11-09T00:00:00Z"
+REFRESHED = "2026-11-09T12:00:00Z"
+
+
+def test_reconcile_matches_by_transaction_id_and_groups_a_payouts_hold_and_release():
+    entries = [entry("gift", "gift-1", "CAP1", 8000), entry("payout", "KT-1", "PAY1", -7760)]
+    report = [txn("CAP1", "80.00", fee_amount={"value": "-3.11"}),
+              txn("HOLD1", "-79.15", code="T1503"),
+              txn("PAY1", "-77.60", code="T0001", fee_amount={"value": "-1.55"}, paypal_reference_id="HOLD1", custom_field="KT-1"),
+              txn("REL1", "79.15", code="T1105", paypal_reference_id="HOLD1", custom_field="KT-1")]
+    result = reconcile(entries, report, refreshed_at=REFRESHED, ledger_started_at=STARTED)
     assert result["balanced"] is True
-    assert {m["ref"] for m in result["matched"]} == {"gift-1", "KT-1"}
+    assert [r["state"] for r in result["rows"]] == ["matched", "matched"]
+    payout = result["rows"][1]["paypal"]
+    assert (payout["cents"], payout["fee_cents"], payout["event"]) == (-7760, -155, "Mass payment")
+    assert {r["transaction_id"] for r in payout["related"]} == {"HOLD1", "REL1"}
     assert result["paypal_only"] == []
 
 
-def test_reconcile_flags_lag_mismatch_and_unknown_paypal_rows():
-    gifts = [
-        {"gift_id": 1, "capture_id": "CAP1", "amount_cents": 8000, "fund_code": "F"},
-        {"gift_id": 2, "capture_id": None, "amount_cents": 5000, "fund_code": "F", "source": "seed"},
-        {"gift_id": 3, "capture_id": "CAP3", "amount_cents": 1000, "fund_code": "F"},
+def test_reconcile_tells_waiting_from_missing_and_mismatched():
+    entries = [
+        entry("gift", "gift-2", None, 5000, source="seed"),
+        entry("gift", "gift-3", "CAP3", 1000),
+        entry("payout", "KT-2", "PAY2", -500, at="2026-11-09T13:00:00Z"),  # newer than the report
+        entry("payout", "KT-3", "PAY3", -500, at="2026-11-09T10:00:00Z"),  # covered by the report, not in it
+        entry("payout", "KT-4", None, -500, status="NO_ANSWER"),
+        entry("payout", "KT-5", "PAY5", -500, status="FAILED"),
     ]
-    result = reconcile(gifts, [], [txn("CAP1", "80.00"), txn("CAP3", "9.00"), txn("OTHER", "-7.60")])
-    assert result["balanced"] is False
-    assert [r["ref"] for r in result["ours_only"]] == ["gift-2"]
-    assert [(r["ref"], r["paypal_cents"]) for r in result["mismatched"]] == [("gift-3", 900)]
-    assert [r["transaction_id"] for r in result["paypal_only"]] == ["OTHER"]
+    result = reconcile(entries, [txn("CAP3", "9.00")], refreshed_at=REFRESHED, ledger_started_at=STARTED)
+    assert [(r["ref"], r["state"]) for r in result["rows"]] == [
+        ("gift-2", "not_paypal"), ("gift-3", "mismatch"), ("KT-2", "waiting"), ("KT-3", "missing"),
+        ("KT-4", "waiting"), ("KT-5", "failed")]
+    assert result["summary"]["to_check"] == 2 and result["balanced"] is False
+
+
+def test_paypal_rows_the_ledger_doesnt_know_are_problems_only_after_the_ledger_started():
+    report = [txn("OLD", "-7.60", code="T0001", at="2026-11-08T09:00:00Z", custom_field="KT-0142"),
+              txn("NEW", "-7.60", code="T0001", at="2026-11-09T09:00:00Z", custom_field="KT-0143"),
+              txn("TOPUP", "5000.00", code="T1900", at="2026-11-09T09:30:00Z", transaction_subject="Initial balance")]
+    result = reconcile([], report, refreshed_at=REFRESHED, ledger_started_at=STARTED)
+    rows = {p["rows"][0]["transaction_id"]: p for p in result["paypal_only"]}
+    assert (rows["OLD"]["before_ledger"], rows["OLD"]["attention"]) == (True, False)
+    assert (rows["NEW"]["label"], rows["NEW"]["attention"]) == ("Payout for KT-0143", True)
+    assert (rows["TOPUP"]["kind"], rows["TOPUP"]["label"], rows["TOPUP"]["attention"]) == ("account", "Initial balance", False)
+    assert result["summary"]["to_check"] == 1
 
 
 def test_split_by_item_walks_gifts_and_lines_in_order():

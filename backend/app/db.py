@@ -72,7 +72,8 @@ CREATE TABLE IF NOT EXISTS payouts (
     transaction_id   TEXT,
     amount_cents     INTEGER NOT NULL,
     fee_cents        INTEGER,
-    status           TEXT NOT NULL,         -- PayPal batch status: PENDING, PROCESSING, SUCCESS, ...
+    status           TEXT NOT NULL,         -- CREATED, NO_ANSWER, then PayPal's: the item's status once known
+                                            -- (SUCCESS, FAILED, RETURNED, ...), else the batch's (PENDING, ...)
     created_at       TEXT NOT NULL,
     updated_at       TEXT NOT NULL
 );
@@ -99,6 +100,24 @@ CREATE TABLE IF NOT EXISTS llm_usage (
     calls  INTEGER NOT NULL
 );
 
+-- Gifts and payouts that "Run the demo again" cleared from the ledger. Sandbox money that moved stays on record,
+-- so reconciliation can still match it to PayPal's report.
+CREATE TABLE IF NOT EXISTS ledger_archive (
+    id              INTEGER PRIMARY KEY AUTOINCREMENT,
+    kind            TEXT NOT NULL CHECK (kind IN ('gift', 'payout')),
+    ref             TEXT NOT NULL,          -- request id, or the donor's name
+    transaction_id  TEXT,
+    amount_cents    INTEGER NOT NULL,
+    status          TEXT,
+    happened_at     TEXT NOT NULL,
+    archived_at     TEXT NOT NULL
+);
+
+CREATE TABLE IF NOT EXISTS meta (
+    key    TEXT PRIMARY KEY,                -- e.g. ledger_started_at
+    value  TEXT NOT NULL
+);
+
 CREATE TABLE IF NOT EXISTS webhook_events (
     id           TEXT PRIMARY KEY,          -- PayPal event id, so redeliveries are ignored
     event_type   TEXT NOT NULL,
@@ -117,6 +136,7 @@ ADDED_COLUMNS = [
     ("requests", "review_json", "TEXT"),              # flags, model, cache hit
     ("request_items", "category", "TEXT"),
     ("request_items", "box_json", "TEXT"),            # [ymin, xmin, ymax, xmax] on the photo, 0-1000
+    ("payouts", "failure", "TEXT"),                   # what PayPal said when a payout didn't go through
 ]
 
 

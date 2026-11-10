@@ -1,14 +1,25 @@
 """Use cases that touch both the database and PayPal."""
 import hashlib
 import json
+import logging
 import sqlite3
 import uuid
+from datetime import datetime, timezone
 from typing import Any, Protocol
 
 from . import ledger, review
 from .db import now_iso, to_cents, transaction
 from .llm import LLM
 from .paypal import PayPalError, approve_link
+
+log = logging.getLogger("uvicorn.error")
+
+# PayPal's payout statuses, from the Payouts API spec (checked 2026-11-10). Item: SUCCESS, FAILED, PENDING, UNCLAIMED,
+# RETURNED, ONHOLD, BLOCKED, REFUNDED, REVERSED. Batch: DENIED, PENDING, PROCESSING, SUCCESS, CANCELED.
+# These mean the money didn't reach the partner, or came back, so the gifts go back to the fund.
+PAYOUT_FAILED = ("FAILED", "RETURNED", "BLOCKED", "REFUNDED", "REVERSED", "DENIED", "CANCELED")
+NO_ANSWER = "NO_ANSWER"  # PayPal didn't answer clearly; the next refresh asks again with the same sender_batch_id
+_FAILED_SQL = ", ".join(f"'{s}'" for s in PAYOUT_FAILED)
 
 
 class PayPal(Protocol):
@@ -141,8 +152,9 @@ def request_detail(conn: sqlite3.Connection, request_id: str) -> dict[str, Any]:
 def _month_spent(conn: sqlite3.Connection, partner_id: str, request_id: str) -> int:
     """What the partner has been paid this calendar month, not counting this request."""
     return conn.execute(
-        """SELECT COALESCE(SUM(p.amount_cents), 0) FROM payouts p JOIN requests r ON r.id = p.request_id
-           WHERE r.partner_id = ? AND substr(p.created_at, 1, 7) = substr(?, 1, 7) AND p.request_id != ?""",
+        f"""SELECT COALESCE(SUM(p.amount_cents), 0) FROM payouts p JOIN requests r ON r.id = p.request_id
+           WHERE r.partner_id = ? AND substr(p.created_at, 1, 7) = substr(?, 1, 7) AND p.request_id != ?
+           AND p.status NOT IN ({_FAILED_SQL})""",
         (partner_id, now_iso(), request_id),
     ).fetchone()[0]
 
@@ -179,63 +191,105 @@ def approve_request(conn: sqlite3.Connection, paypal: PayPal, request_id: str, a
             raise Conflict(f"Paying {payable / 100:,.2f} would take {partner['name']} past its monthly cap of "
                            f"{partner['month_cap_cents'] / 100:,.2f} ({spent / 100:,.2f} paid this month).")
         plan = ledger.plan_fifo(ledger.gift_balances(conn, req["fund_code"]), payable)
+        # A payout PayPal refused or sent back before doesn't stop a new try.
+        conn.execute(f"DELETE FROM payouts WHERE request_id = ? AND status IN ({_FAILED_SQL})", (request_id,))
         for balance, cents in plan:
             conn.execute("INSERT INTO allocations (gift_id, request_id, amount_cents) VALUES (?, ?, ?)",
                          (balance.gift_id, request_id, cents))
-        sender_batch_id = f"{request_id}-{uuid.uuid4().hex[:10]}"
+        # One sender_batch_id per try, fixed before PayPal is called: PayPal never makes two batches with the
+        # same one, so asking again after an unclear answer can't pay the partner twice.
         stamp = now_iso()
         conn.execute(
             "INSERT INTO payouts (request_id, sender_batch_id, amount_cents, status, created_at, updated_at) "
             "VALUES (?, ?, ?, 'CREATED', ?, ?)",
-            (request_id, sender_batch_id, payable, stamp, stamp),
+            (request_id, f"{request_id}-{uuid.uuid4().hex[:10]}", payable, stamp, stamp),
         )
         conn.execute("UPDATE requests SET status = 'paying', approved_by = ?, approved_at = ? WHERE id = ?",
                      (approver, stamp, request_id))
-        fund = conn.execute("SELECT name FROM funds WHERE code = ?", (req["fund_code"],)).fetchone()
+    _send_payout(conn, paypal, request_id)
+    return request_detail(conn, request_id)
 
-    # The money only moves after our ledger has committed. If PayPal refuses, undo the ledger.
+
+def _send_payout(conn: sqlite3.Connection, paypal: PayPal, request_id: str) -> None:
+    """Ask PayPal to pay, after the ledger has committed. A clear refusal undoes the approval. No clear answer
+    (a timeout, a PayPal server error) keeps it: the money may have left, so the next refresh asks again with
+    the same sender_batch_id and PayPal either makes the batch or points to the one it already made."""
+    payout = conn.execute("SELECT * FROM payouts WHERE request_id = ?", (request_id,)).fetchone()
+    req, items = _load_request(conn, request_id)
+    partner = conn.execute("SELECT * FROM partners WHERE id = ?", (req["partner_id"],)).fetchone()
+    fund = conn.execute("SELECT name FROM funds WHERE code = ?", (req["fund_code"],)).fetchone()
     fits = ", ".join(i["label"] for i in items if i["verdict"] == "fits")
     try:
         result = paypal.create_payout(
-            sender_batch_id=sender_batch_id, sender_item_id=request_id, receiver_email=partner["paypal_email"],
-            amount_cents=payable, subject=f"Kindtrail payout for request {request_id}",
+            sender_batch_id=payout["sender_batch_id"], sender_item_id=request_id, receiver_email=partner["paypal_email"],
+            amount_cents=payout["amount_cents"], subject=f"Kindtrail payout for request {request_id}",
             note=f"{fund['name']}: {fits}",
         )
-    except PayPalError:
-        with transaction(conn):
-            conn.execute("DELETE FROM allocations WHERE request_id = ?", (request_id,))
-            conn.execute("DELETE FROM payouts WHERE request_id = ?", (request_id,))
-            conn.execute("UPDATE requests SET status = 'reviewed', approved_by = NULL, approved_at = NULL WHERE id = ?",
-                         (request_id,))
-        raise
+    except PayPalError as e:
+        if not e.ambiguous:
+            _undo_approval(conn, request_id)
+            raise
+        log.warning("payout %s: no clear answer from PayPal, will ask again: %s", payout["sender_batch_id"], e)
+        conn.execute("UPDATE payouts SET status = ?, failure = ?, updated_at = ? WHERE request_id = ?",
+                     (NO_ANSWER, str(e)[:300], now_iso(), request_id))
+        return
+    with transaction(conn):
+        header = result.get("batch_header", {})
+        conn.execute("UPDATE payouts SET payout_batch_id = ?, status = ?, failure = NULL, updated_at = ? "
+                     "WHERE request_id = ?",
+                     (header.get("payout_batch_id"), header.get("batch_status", "PENDING"), now_iso(), request_id))
+        if result.get("items"):  # the batch an earlier try had already made, with its outcome
+            apply_payout_batch(conn, request_id, result)
 
-    header = result.get("batch_header", {})
-    conn.execute("UPDATE payouts SET payout_batch_id = ?, status = ?, updated_at = ? WHERE request_id = ?",
-                 (header.get("payout_batch_id"), header.get("batch_status", "PENDING"), now_iso(), request_id))
-    return request_detail(conn, request_id)
+
+def _undo_approval(conn: sqlite3.Connection, request_id: str) -> None:
+    with transaction(conn):
+        conn.execute("DELETE FROM allocations WHERE request_id = ?", (request_id,))
+        conn.execute("DELETE FROM payouts WHERE request_id = ?", (request_id,))
+        conn.execute("UPDATE requests SET status = 'reviewed', approved_by = NULL, approved_at = NULL WHERE id = ?",
+                     (request_id,))
+
+
+def _age_seconds(iso: str) -> float:
+    return (datetime.now(timezone.utc) - datetime.fromisoformat(iso.replace("Z", "+00:00"))).total_seconds()
 
 
 def refresh_payout(conn: sqlite3.Connection, paypal: PayPal, request_id: str) -> dict[str, Any]:
     payout = conn.execute("SELECT * FROM payouts WHERE request_id = ?", (request_id,)).fetchone()
-    if payout is None or not payout["payout_batch_id"]:
+    if payout is None:
         raise NotFound(f"request {request_id} has no payout yet")
+    if not payout["payout_batch_id"]:
+        # No batch yet: PayPal gave no clear answer, or the server stopped mid-call. Ask again, same batch id.
+        stuck = payout["status"] == NO_ANSWER or (payout["status"] == "CREATED" and _age_seconds(payout["updated_at"]) > 120)
+        if stuck:
+            _send_payout(conn, paypal, request_id)
+        return request_detail(conn, request_id)
     batch = paypal.get_payout_batch(payout["payout_batch_id"])
-    apply_payout_batch(conn, request_id, batch)
+    with transaction(conn):
+        apply_payout_batch(conn, request_id, batch)
     return request_detail(conn, request_id)
 
 
 def apply_payout_batch(conn: sqlite3.Connection, request_id: str, batch: dict[str, Any]) -> None:
+    """Record what PayPal says about a request's payout. Call inside a transaction."""
     header = batch.get("batch_header", {})
     item = next((i for i in batch.get("items", [])
                  if i.get("payout_item", {}).get("sender_item_id") == request_id), {})
     fee = item.get("payout_item_fee") or header.get("fees")
-    status = header.get("batch_status", "PENDING")
+    batch_status, item_status = header.get("batch_status", "PENDING"), item.get("transaction_status")
+    errors = item.get("errors") if isinstance(item.get("errors"), dict) else {}
     conn.execute(
         "UPDATE payouts SET status = ?, transaction_id = COALESCE(?, transaction_id), fee_cents = COALESCE(?, fee_cents), "
-        "updated_at = ? WHERE request_id = ?",
-        (status, item.get("transaction_id"), to_cents(fee["value"]) if fee else None, now_iso(), request_id),
+        "failure = COALESCE(?, failure), updated_at = ? WHERE request_id = ?",
+        (item_status or batch_status, item.get("transaction_id"), to_cents(fee["value"]) if fee else None,
+         errors.get("message") or errors.get("name"), now_iso(), request_id),
     )
-    if status == "SUCCESS" and item.get("transaction_status") in (None, "SUCCESS"):
+    if item_status in PAYOUT_FAILED or batch_status in PAYOUT_FAILED:
+        # Nothing reached the partner (or it came back): free the gifts and put the request back for review.
+        conn.execute("DELETE FROM allocations WHERE request_id = ?", (request_id,))
+        conn.execute("UPDATE requests SET status = 'reviewed', approved_by = NULL, approved_at = NULL "
+                     "WHERE id = ? AND status IN ('paying', 'paid')", (request_id,))
+    elif batch_status == "SUCCESS" and item_status in (None, "SUCCESS"):
         conn.execute("UPDATE requests SET status = 'paid' WHERE id = ? AND status = 'paying'", (request_id,))
 
 
@@ -375,22 +429,55 @@ def gift_impact(conn: sqlite3.Connection, gift_id: int) -> dict[str, Any]:
     }
 
 
+# Reconciliation ---------------------------------------------------------------------------
+
+def ledger_started_at(conn: sqlite3.Connection) -> str | None:
+    row = conn.execute("SELECT value FROM meta WHERE key = 'ledger_started_at'").fetchone()
+    return row["value"] if row else None
+
+
+def ledger_entries(conn: sqlite3.Connection) -> list[dict[str, Any]]:
+    """Every gift and payout this ledger knows about, including ones a demo reset moved to the archive,
+    signed the way PayPal's report signs them (money in positive, money out negative)."""
+    out: list[dict[str, Any]] = []
+    for g in conn.execute("SELECT * FROM gifts WHERE status = 'captured' ORDER BY captured_at, id"):
+        out.append({"kind": "gift", "ref": f"gift-{g['id']}", "label": f"Gift from {g['donor_name']}",
+                    "at": g["captured_at"], "transaction_id": g["paypal_capture_id"], "ours_cents": g["amount_cents"],
+                    "source": g["source"], "status": g["status"], "earlier": False})
+    for p in conn.execute("SELECT p.*, pa.name AS partner FROM payouts p JOIN requests r ON r.id = p.request_id "
+                          "JOIN partners pa ON pa.id = r.partner_id ORDER BY p.created_at"):
+        out.append({"kind": "payout", "ref": p["request_id"], "label": f"Payout for {p['request_id']} to {p['partner']}",
+                    "at": p["created_at"], "transaction_id": p["transaction_id"], "ours_cents": -p["amount_cents"],
+                    "source": "paypal", "status": p["status"], "earlier": False})
+    for a in conn.execute("SELECT * FROM ledger_archive ORDER BY id"):
+        gift = a["kind"] == "gift"
+        out.append({"kind": a["kind"], "ref": a["ref"], "label": f"Gift from {a['ref']}" if gift else f"Payout for {a['ref']}",
+                    "at": a["happened_at"], "transaction_id": a["transaction_id"],
+                    "ours_cents": a["amount_cents"] if gift else -a["amount_cents"], "source": "paypal",
+                    "status": a["status"], "earlier": True})
+    out.sort(key=lambda e: e["at"] or "", reverse=True)
+    return out
+
+
 # Webhooks ---------------------------------------------------------------------------------
 
-def handle_webhook(conn: sqlite3.Connection, event: dict[str, Any], verified: bool) -> str:
-    """Record every event once; only verified events may change the ledger."""
+def handle_webhook(conn: sqlite3.Connection, event: dict[str, Any]) -> str:
+    """Act on a webhook event once, by its PayPal event id. Only call this with an event whose signature PayPal
+    verified: unverified ones are never stored, so a later delivery that does verify still counts."""
     resource = event.get("resource") or {}
-    inserted = conn.execute(
-        "INSERT OR IGNORE INTO webhook_events (id, event_type, resource_id, verified, payload, received_at) "
-        "VALUES (?, ?, ?, ?, ?, ?)",
-        (event.get("id"), event.get("event_type", ""), resource.get("id"), int(verified), json.dumps(event), now_iso()),
-    ).rowcount
-    if not inserted:
-        return "duplicate"
-    if not verified:
-        return "stored-unverified"
-
     kind = event.get("event_type", "")
+    with transaction(conn):
+        inserted = conn.execute(
+            "INSERT OR IGNORE INTO webhook_events (id, event_type, resource_id, verified, payload, received_at) "
+            "VALUES (?, ?, ?, 1, ?, ?)",
+            (event.get("id"), kind, resource.get("id"), json.dumps(event), now_iso()),
+        ).rowcount
+        if not inserted:
+            return "duplicate"
+        return _apply_event(conn, kind, resource)
+
+
+def _apply_event(conn: sqlite3.Connection, kind: str, resource: dict[str, Any]) -> str:
     if kind == "PAYMENT.CAPTURE.COMPLETED":
         order_id = (resource.get("supplementary_data") or {}).get("related_ids", {}).get("order_id")
         gift = conn.execute("SELECT * FROM gifts WHERE paypal_order_id = ?", (order_id,)).fetchone()
@@ -399,13 +486,20 @@ def handle_webhook(conn: sqlite3.Connection, event: dict[str, Any], verified: bo
                          (resource["id"], now_iso(), gift["id"]))
             return "gift-captured"
     elif kind.startswith("PAYMENT.PAYOUTS-ITEM."):
-        item = resource.get("payout_item") or {}
-        request_id = item.get("sender_item_id")
-        if request_id and conn.execute("SELECT 1 FROM payouts WHERE request_id = ?", (request_id,)).fetchone():
+        request_id = (resource.get("payout_item") or {}).get("sender_item_id")
+        payout = conn.execute("SELECT payout_batch_id FROM payouts WHERE request_id = ?", (request_id,)).fetchone()
+        # Request ids start again after a demo reset, so the event has to be about this payout's batch.
+        if payout and payout["payout_batch_id"] and payout["payout_batch_id"] == resource.get("payout_batch_id"):
             batch_status = "SUCCESS" if resource.get("transaction_status") == "SUCCESS" else "PROCESSING"
-            apply_payout_batch(conn, request_id, {"batch_header": {"batch_status": batch_status},
-                                                  "items": [resource]})
+            apply_payout_batch(conn, request_id, {"batch_header": {"batch_status": batch_status}, "items": [resource]})
             return "payout-updated"
+    elif kind == "PAYMENT.PAYOUTSBATCH.DENIED":
+        header = resource.get("batch_header") or {}
+        payout = conn.execute("SELECT request_id FROM payouts WHERE payout_batch_id = ?",
+                              (header.get("payout_batch_id"),)).fetchone()
+        if payout:
+            apply_payout_batch(conn, payout["request_id"], {"batch_header": {**header, "batch_status": "DENIED"}})
+            return "payout-denied"
     return "ignored"
 
 

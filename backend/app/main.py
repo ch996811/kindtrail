@@ -147,6 +147,9 @@ def create_app(settings: Settings | None = None, paypal: Any = None, conn: sqlit
     uploads = RateLimit("receipt uploads", 3600, per_visitor=12)
     readings = RateLimit("readings of donor words", 3600, per_visitor=30)
     checkouts = RateLimit("checkout attempts", 3600, per_visitor=20)
+    reports = RateLimit("checks against PayPal's report", 600, per_visitor=20)
+    hooks = RateLimit("webhook deliveries", 600, everyone=300)
+    report_cache: dict[str, Any] = {}  # PayPal's report takes ~10 s to fetch; reuse it for a minute
 
     @app.exception_handler(TooMany)
     async def _too_many(_: Request, exc: TooMany):
@@ -295,32 +298,41 @@ def create_app(settings: Settings | None = None, paypal: Any = None, conn: sqlit
     def refresh(request_id: str, request: Request, conn: sqlite3.Connection = Depends(db)):
         return service.refresh_payout(conn, pp(request), request_id)
 
-    @app.get("/api/reconcile")
-    def reconcile(request: Request, days: int = 7, conn: sqlite3.Connection = Depends(db)):
+    @app.get("/api/reconcile", dependencies=[Depends(reports)])
+    def reconcile(request: Request, conn: sqlite3.Connection = Depends(db)):
+        """The ledger next to PayPal's Transaction Search report, from two days before this ledger started."""
+        started = service.ledger_started_at(conn)
         end = datetime.now(timezone.utc) - timedelta(seconds=5)
-        start = end - timedelta(days=max(1, min(days, 31)))
-        gifts = [{"gift_id": g["id"], "capture_id": g["paypal_capture_id"], "amount_cents": g["amount_cents"],
-                  "fund_code": g["fund_code"], "source": g["source"]}
-                 for g in conn.execute("SELECT * FROM gifts WHERE status = 'captured'")]
-        payouts = [{"request_id": p["request_id"], "transaction_id": p["transaction_id"], "amount_cents": p["amount_cents"]}
-                   for p in conn.execute("SELECT * FROM payouts")]
-        result = ledger.reconcile(gifts, payouts, pp(request).search_transactions(start, end))
-        result["window"] = {"start": start.isoformat(), "end": end.isoformat()}
-        result["note"] = "PayPal can take up to 3 hours to list a new transaction in Transaction Search."
-        return result
+        since = ledger._when(started) or end
+        start = max(end - timedelta(days=31), since - timedelta(days=2))  # PayPal allows 31 days per call
+        cached = report_cache.get("report")
+        if cached and time.monotonic() - cached["fetched"] < 60:
+            txns, refreshed, checked = cached["txns"], cached["refreshed"], cached["checked"]
+        else:
+            txns, refreshed = pp(request).search_transactions(start, end)
+            checked = end.strftime("%Y-%m-%dT%H:%M:%SZ")
+            report_cache["report"] = {"fetched": time.monotonic(), "txns": txns, "refreshed": refreshed, "checked": checked}
+        result = ledger.reconcile(service.ledger_entries(conn), txns, refreshed_at=refreshed, ledger_started_at=started)
+        return {**result, "checked_at": checked, "window_start": start.strftime("%Y-%m-%dT%H:%M:%SZ")}
 
-    @app.post("/api/webhooks/paypal")
+    @app.post("/api/webhooks/paypal", dependencies=[Depends(hooks)])
     def paypal_webhook(request: Request, event: dict[str, Any] = Body(...), conn: sqlite3.Connection = Depends(db)):
-        verified = False
-        if settings.paypal_webhook_id:
-            try:
-                verified = pp(request).verify_webhook(webhook_id=settings.paypal_webhook_id,
-                                                      headers=dict(request.headers), event=event)
-            except PayPalError as e:
-                log.warning("webhook verification call failed: %s", e)
-                verified = False
-        result = service.handle_webhook(conn, event, verified)
-        log.info("paypal webhook %s %s verified=%s -> %s", event.get("event_type"), event.get("id"), verified, result)
+        # Anything but a 2xx makes PayPal deliver the event again later, so only a verified event gets one.
+        what = f"{event.get('event_type')} {event.get('id')}"
+        if not settings.paypal_webhook_id:
+            log.warning("paypal webhook %s: PAYPAL_WEBHOOK_ID isn't set, so it can't be verified", what)
+            return JSONResponse({"result": "not-configured"}, status_code=503)
+        try:
+            verified = pp(request).verify_webhook(webhook_id=settings.paypal_webhook_id,
+                                                  headers=dict(request.headers), event=event)
+        except PayPalError as e:
+            log.warning("paypal webhook %s: verification call failed, PayPal will retry: %s", what, e)
+            return JSONResponse({"result": "verification-unavailable"}, status_code=503)
+        if not verified:
+            log.warning("paypal webhook %s: signature did not verify; not stored", what)
+            return JSONResponse({"result": "unverified"}, status_code=400)
+        result = service.handle_webhook(conn, event)
+        log.info("paypal webhook %s verified -> %s", what, result)
         return {"result": result}
 
     dist = Path(settings.frontend_dist).resolve()

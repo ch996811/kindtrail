@@ -4,6 +4,7 @@ Gifts in a fund are spent oldest first (FIFO), so every payout cent traces back 
 """
 import sqlite3
 from dataclasses import dataclass
+from datetime import datetime, timezone
 from typing import Any
 
 
@@ -93,46 +94,135 @@ def split_by_item(allocations: list[tuple[int, int]], items: list[tuple[str, int
 
 # Reconciliation ----------------------------------------------------------------------------
 
-def reconcile(gifts: list[dict[str, Any]], payouts: list[dict[str, Any]],
-              paypal_txns: list[dict[str, Any]]) -> dict[str, Any]:
-    """Match our ledger against PayPal Transaction Search by transaction id.
+# Transaction Search event codes Kindtrail's sandbox account produces (PayPal's names, checked 2026-11-10).
+EVENT_NAMES = {
+    "T0001": "Mass payment",                      # a Payouts payment to the partner
+    "T0006": "Express Checkout payment",          # a donor's gift through Checkout
+    "T1503": "Hold on available balance",         # Payouts holds the amount plus fee first...
+    "T1105": "Reversal of general account hold",  # ...and releases the hold when the payment goes out
+    "T1900": "General account correction",        # e.g. the sandbox's initial balance
+}
+STATUS_NAMES = {"S": "completed", "P": "pending", "D": "denied", "V": "reversed"}  # transaction_status codes
 
-    gifts:   [{gift_id, capture_id, amount_cents, fund_code, source}]
-    payouts: [{request_id, transaction_id, amount_cents}]
-    Amounts from PayPal are signed: captures positive, payouts negative.
+
+def _when(iso: str | None) -> datetime | None:
+    """PayPal and the ledger write times as '...Z' or '...+0000'; compare them as datetimes."""
+    if not iso:
+        return None
+    iso = iso.strip().replace("Z", "+00:00")
+    if len(iso) > 5 and iso[-5] in "+-" and iso[-3] != ":":
+        iso = iso[:-2] + ":" + iso[-2:]
+    try:
+        when = datetime.fromisoformat(iso)
+    except ValueError:
+        return None
+    return when if when.tzinfo else when.replace(tzinfo=timezone.utc)
+
+
+def _cents(money: dict[str, Any] | None) -> int:
+    return round(float(money["value"]) * 100) if money and money.get("value") not in (None, "") else 0
+
+
+def _groups(txns: list[dict[str, Any]]) -> list[list[dict[str, Any]]]:
+    """Group PayPal's rows by the payment they belong to. A payout shows up as three rows: a hold on the balance
+    (T1503), then the payment (T0001) and the hold's release (T1105), both pointing at the hold through
+    paypal_reference_id. The hold and its release cancel out."""
+    by_id = {t["transaction_id"]: t for t in txns if t.get("transaction_id")}
+    groups: dict[str, list[dict[str, Any]]] = {}
+    for t in txns:
+        ref = by_id.get(t.get("paypal_reference_id") or "")
+        key = ref["transaction_id"] if ref and ref.get("transaction_event_code") == "T1503" else t.get("transaction_id")
+        groups.setdefault(key or "", []).append(t)
+    return list(groups.values())
+
+
+def _main(group: list[dict[str, Any]]) -> dict[str, Any]:
+    """The row that says what happened: the payment itself, not its hold or release."""
+    for code in ("T0001", "T0006"):
+        for t in group:
+            if t.get("transaction_event_code") == code:
+                return t
+    return next((t for t in group if t.get("transaction_event_code") not in ("T1503", "T1105")), group[0])
+
+
+def _row(t: dict[str, Any]) -> dict[str, Any]:
+    code = t.get("transaction_event_code")
+    return {"transaction_id": t.get("transaction_id"), "event_code": code, "event": EVENT_NAMES.get(code, code),
+            "cents": _cents(t.get("transaction_amount")), "fee_cents": _cents(t.get("fee_amount")),
+            "at": t.get("transaction_initiation_date"), "custom_field": t.get("custom_field"),
+            "status": STATUS_NAMES.get(t.get("transaction_status"), t.get("transaction_status"))}
+
+
+def reconcile(entries: list[dict[str, Any]], paypal_txns: list[dict[str, Any]], *, refreshed_at: str | None,
+              ledger_started_at: str | None) -> dict[str, Any]:
+    """Match the ledger against PayPal's Transaction Search report by transaction id.
+
+    entries: the ledger's gifts and payouts, [{kind: 'gift'|'payout', ref, label, at, transaction_id,
+             ours_cents, source: 'paypal'|'seed', status, earlier}]. Amounts are signed the way PayPal signs
+             them: gifts in are positive, payouts out are negative.
+    refreshed_at: PayPal's last_refreshed_datetime. Anything newer can't be in the report yet.
+    ledger_started_at: PayPal rows from before then belong to an earlier ledger, so they're context, not problems.
     """
-    by_id = {t.get("transaction_id"): t for t in paypal_txns if t.get("transaction_id")}
-    seen: set[str] = set()
-    matched, mismatched, ours_only = [], [], []
+    groups = _groups(paypal_txns)
+    by_main = {_main(g).get("transaction_id"): g for g in groups}
+    refreshed, started = _when(refreshed_at), _when(ledger_started_at)
+    used: set[int] = set()
+    rows = []
 
-    def check(kind: str, ref: str, txn_id: str | None, expected_cents: int, extra: dict[str, Any]) -> None:
-        row = {"kind": kind, "ref": ref, "transaction_id": txn_id, "ours_cents": expected_cents, **extra}
-        txn = by_id.get(txn_id) if txn_id else None
-        if txn is None:
-            ours_only.append(row)
-            return
-        seen.add(txn_id)
-        theirs = round(float(txn["transaction_amount"]["value"]) * 100)
-        row["paypal_cents"] = theirs
-        row["paypal_status"] = txn.get("transaction_status")
-        (matched if theirs == expected_cents else mismatched).append(row)
+    for e in entries:
+        row = {**e, "paypal": None}
+        group = by_main.get(e.get("transaction_id")) if e.get("transaction_id") else None
+        if e.get("source") == "seed":
+            row["state"], row["detail"] = "not_paypal", "A demo gift added without PayPal, so PayPal has no record of it."
+        elif group is not None:
+            used.add(id(group))
+            main = _main(group)
+            theirs = _row(main)
+            row["paypal"] = {**theirs, "related": [_row(t) for t in group if t is not main]}
+            if theirs["cents"] != e["ours_cents"]:
+                row["state"] = "mismatch"
+                row["detail"] = f"PayPal shows {theirs['cents'] / 100:+,.2f}, the ledger {e['ours_cents'] / 100:+,.2f}."
+            elif main.get("transaction_status") in ("D", "V"):
+                row["state"], row["detail"] = "mismatch", f"PayPal says this payment was {theirs['status']}."
+            else:
+                row["state"], row["detail"] = "matched", "Same transaction ID and amount in PayPal's report."
+        elif e["kind"] == "payout" and e.get("status") in ("FAILED", "RETURNED", "BLOCKED", "REFUNDED", "REVERSED",
+                                                           "DENIED", "CANCELED"):
+            row["state"], row["detail"] = "failed", "PayPal didn't complete this payout, so nothing was paid."
+        elif not e.get("transaction_id"):
+            row["state"], row["detail"] = "waiting", "PayPal hasn't confirmed this payout with a transaction ID yet."
+        elif refreshed is None or (_when(e.get("at")) or refreshed) > refreshed:
+            row["state"], row["detail"] = "waiting", "Not in PayPal's report yet: the report runs a few hours behind."
+        else:
+            row["state"], row["detail"] = "missing", "Not in PayPal's report, though the report covers this time."
+        rows.append(row)
 
-    for g in gifts:
-        check("gift", f"gift-{g['gift_id']}", g.get("capture_id"), g["amount_cents"],
-              {"fund_code": g.get("fund_code"), "source": g.get("source", "paypal")})
-    for p in payouts:
-        check("payout", p["request_id"], p.get("transaction_id"), -p["amount_cents"], {})
+    paypal_only = []
+    for g in groups:
+        if id(g) in used:
+            continue
+        main = _main(g)
+        code, tag = main.get("transaction_event_code"), main.get("custom_field")
+        if code == "T0001":
+            kind, label = "payout", f"Payout for {tag}" if tag else "Payout"
+        elif code == "T0006":
+            kind, label = "gift", f"Gift tagged {tag}" if tag else "Checkout payment"
+        elif code in ("T1503", "T1105"):
+            kind, label = "payout", "Hold for a payout" + (" and its release" if len(g) > 1 else "")
+        else:
+            kind, label = "account", main.get("transaction_subject") or EVENT_NAMES.get(code, code or "Other")
+        when = _when(main.get("transaction_initiation_date"))
+        before = bool(started and when and when < started)
+        paypal_only.append({
+            "kind": kind, "label": label, "at": main.get("transaction_initiation_date"), "before_ledger": before,
+            "net_cents": sum(_cents(t.get("transaction_amount")) + _cents(t.get("fee_amount")) for t in g),
+            # A payment after the ledger started that the ledger doesn't know about is a real question.
+            "attention": not before and kind in ("payout", "gift"),
+            "rows": [_row(t) for t in sorted(g, key=lambda t: (t.get("transaction_initiation_date") or ""))],
+        })
+    paypal_only.sort(key=lambda p: p["at"] or "", reverse=True)
 
-    paypal_only = [
-        {"transaction_id": t["transaction_id"], "event_code": t.get("transaction_event_code"),
-         "paypal_cents": round(float(t["transaction_amount"]["value"]) * 100),
-         "custom_field": t.get("custom_field"), "paypal_status": t.get("transaction_status")}
-        for tid, t in by_id.items() if tid not in seen
-    ]
-    return {
-        "matched": matched,
-        "mismatched": mismatched,
-        "ours_only": ours_only,
-        "paypal_only": paypal_only,
-        "balanced": not mismatched and not ours_only,
-    }
+    count = {s: sum(1 for r in rows if r["state"] == s) for s in ("matched", "waiting", "not_paypal", "failed")}
+    to_check = sum(1 for r in rows if r["state"] in ("mismatch", "missing")) + sum(1 for p in paypal_only if p["attention"])
+    return {"rows": rows, "paypal_only": paypal_only, "summary": {**count, "to_check": to_check},
+            "balanced": to_check == 0, "refreshed_at": refreshed_at, "ledger_started_at": ledger_started_at}

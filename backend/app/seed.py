@@ -44,6 +44,8 @@ def load_demo_cache(conn: sqlite3.Connection) -> int:
 
 
 def seed(conn: sqlite3.Connection, partner_email: str, llm: LLM | None = None, demo_gifts: bool = False) -> None:
+    # Reconciliation expects everything PayPal records from here on to be in this ledger.
+    conn.execute("INSERT OR IGNORE INTO meta (key, value) VALUES ('ledger_started_at', ?)", (now_iso(),))
     if llm is not None:
         load_demo_cache(conn)
 
@@ -80,13 +82,26 @@ def seed(conn: sqlite3.Connection, partner_email: str, llm: LLM | None = None, d
             [(FUND_CODE, name, cents, at, at) for name, cents, at in DEMO_GIFTS])
 
 
+def _archive(conn: sqlite3.Connection, request_id: str | None = None) -> None:
+    """Keep a record of sandbox money that moved before the ledger rows that describe it are cleared."""
+    stamp = now_iso()
+    conn.execute("INSERT INTO ledger_archive (kind, ref, transaction_id, amount_cents, status, happened_at, archived_at) "
+                 "SELECT 'payout', request_id, transaction_id, amount_cents, status, created_at, ? FROM payouts "
+                 "WHERE payout_batch_id IS NOT NULL AND (? IS NULL OR request_id = ?)", (stamp, request_id, request_id))
+    if request_id is None:  # captured PayPal gifts to funds that visitors made, which the reset removes
+        conn.execute("INSERT INTO ledger_archive (kind, ref, transaction_id, amount_cents, status, happened_at, archived_at) "
+                     "SELECT 'gift', donor_name, paypal_capture_id, amount_cents, status, captured_at, ? FROM gifts "
+                     "WHERE source = 'paypal' AND status = 'captured' AND fund_code != ?", (stamp, FUND_CODE))
+
+
 def reset_demo(conn: sqlite3.Connection) -> None:
     """Back to the starting state, so visitors can run the demo again: the ledger is cleared, KT-0142 is waiting
     for review, and requests, funds and unpaid orders that visitors added are removed (the demo is shared, so
     one visitor's test photos shouldn't stay up for the next). Gifts that really went through PayPal stay, and
-    sandbox payouts already sent stay sent; only Kindtrail's own records are cleared."""
+    sandbox payouts already sent stay sent and on record in ledger_archive."""
     keep = DEMO_REQUEST["id"]
     with transaction(conn):
+        _archive(conn)
         conn.execute("DELETE FROM allocations")
         conn.execute("DELETE FROM payouts")
         conn.execute("DELETE FROM request_items WHERE request_id != ?", (keep,))
@@ -100,6 +115,7 @@ def reset_demo(conn: sqlite3.Connection) -> None:
 def reset_request(conn: sqlite3.Connection, request_id: str = "KT-0142") -> None:
     """Put a request back to 'reviewed' so the demo can be run again. Sandbox money already sent stays sent."""
     with transaction(conn):
+        _archive(conn, request_id)
         conn.execute("DELETE FROM allocations WHERE request_id = ?", (request_id,))
         conn.execute("DELETE FROM payouts WHERE request_id = ?", (request_id,))
         conn.execute("UPDATE requests SET status = 'reviewed', approved_by = NULL, approved_at = NULL WHERE id = ?",

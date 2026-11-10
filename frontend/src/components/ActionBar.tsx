@@ -48,7 +48,7 @@ export function ActionBar({ partner, amount, stage, notice, canApprove, onApprov
             type="button"
             onClick={onSendBack}
             disabled={stage === 'paying'}
-            className="rounded-[14px] bg-white/12 px-[18px] py-3 font-bold hover:bg-white/20 disabled:opacity-50 max-sm:flex-1"
+            className="rounded-[14px] bg-white/12 px-[18px] py-3 font-bold whitespace-nowrap hover:bg-white/20 disabled:opacity-50 max-sm:flex-1"
           >
             Send back
           </button>
@@ -56,7 +56,7 @@ export function ActionBar({ partner, amount, stage, notice, canApprove, onApprov
             type="button"
             onClick={onApprove}
             disabled={stage === 'paying' || !canApprove}
-            className="rounded-[14px] bg-pink px-[18px] py-3 font-bold hover:bg-pink-hover disabled:cursor-not-allowed disabled:opacity-60 max-sm:flex-1"
+            className="rounded-[14px] bg-pink px-[18px] py-3 font-bold whitespace-nowrap hover:bg-pink-hover disabled:cursor-not-allowed disabled:opacity-60 max-sm:flex-1"
           >
             {stage === 'paying' ? 'Paying...' : `Approve ${usd(amount)}`}
           </button>

@@ -19,7 +19,7 @@ Kindtrail closes that loop:
 
 > Built for the [PayPal AI Hackathon](https://paypalaihackathon.devpost.com/).
 > **Live demo:** https://kindtrail.onrender.com (the free server may take about a minute to wake up)
-> · **Demo video (2:26):** https://youtu.be/rzFJwjq2478
+> · **Demo video (2:03):** https://youtu.be/NbHjPA5cUkA
 > Everything runs against the PayPal **sandbox** with made-up data; no real money moves.
 
 ## How the AI review works
@@ -33,7 +33,10 @@ The model reads; plain Python decides.
    price, a spending category and the line's position on the photo.
 3. **Rule engine.** Deterministic code (`backend/app/review.py`) checks each line against the policy:
    allowed or ruled-out category, shop region, purchase date, a resubmitted receipt, and arithmetic that
-   doesn't add up. Cash equivalents and alcohol are never paid from restricted gifts.
+   doesn't add up. Cash equivalents and alcohol are never paid from restricted gifts. It fails closed:
+   if the model can't tell something a rule needs (the currency, the shop's place, the date), or its
+   answer is incomplete, nothing is paid; a line whose quantity, price and total disagree isn't paid;
+   lines that add up to more than the receipt's total, or a discount line, block the whole receipt.
    Donors see the policy before it is saved, can add or remove uses, and get a live preview of how
    it would judge receipts the AI has already read.
 4. **Reviewer.** A person sees the photo with every line boxed green or plum, the reason for each
@@ -43,6 +46,26 @@ Models (free tier): `gemini-3.5-flash-lite` with minimal thinking (about 3 s per
 to `gemma-4-31b-it`. Every answer is cached, a daily cap protects the free quota, and
 `backend/demo/llm_cache.json` ships the answers for the demo receipts, so the hosted demo works even
 with no key (`LLM_PROVIDER=replay`).
+
+## Moving money safely
+
+- **One payout per approval.** Approving takes a database write lock, allocates gifts oldest first and
+  saves a `sender_batch_id` before PayPal is called. If PayPal gives no clear answer (a timeout, a 5xx),
+  the approval stands and the next refresh sends the same `sender_batch_id` again: PayPal refuses a second
+  batch with it and points to the first (checked in the sandbox), so the partner can't be paid twice.
+  A clear refusal undoes the approval.
+- **Payouts that don't arrive.** If PayPal reports the payout `FAILED`, `RETURNED`, `BLOCKED`,
+  `REFUNDED`, `REVERSED`, `DENIED` or `CANCELED`, the gifts go back to the fund and the request goes back
+  to the reviewer with PayPal's reason.
+- **Webhooks.** Every event is checked with `verify-webhook-signature`. Only verified events are stored
+  and acted on, once per event id; anything else gets a 4xx (a 503 if verification itself is down) so
+  PayPal delivers it again. A payout event must name the payout's own batch, because request ids start
+  again after a demo reset.
+- **Reconciliation** (`/reconcile`, linked from the review desk). Every gift and payout in the ledger is
+  matched to PayPal's Transaction Search report by transaction id. A payout appears there as three rows
+  (a hold on the balance, the payment, the hold's release); Kindtrail groups them. The report's
+  `last_refreshed_datetime` tells "not in the report yet" (it runs a few hours behind) from "missing".
+  Payouts cleared by "Run the demo again" stay on record in `ledger_archive`, so they still reconcile.
 
 ## Stack
 
@@ -119,12 +142,13 @@ docker run --rm -p 8000:8000 -e DEMO_MODE=1 --env-file .env kindtrail
 | GET | `/api/requests/{id}` | A spending request with its line verdicts and which gifts would pay for it |
 | POST | `/api/requests/{id}/approve` | Allocate gifts oldest-first, then pay the partner through PayPal Payouts |
 | POST | `/api/requests/{id}/send-back` | Return the request to the partner instead of paying it |
-| POST | `/api/requests/{id}/refresh` | Pull the payout status from PayPal |
-| GET | `/api/reconcile` | Match the ledger against PayPal Transaction Search |
-| POST | `/api/webhooks/paypal` | Verified PayPal webhooks (captures, payout items) |
+| POST | `/api/requests/{id}/refresh` | Pull the payout status from PayPal (or resend a payout PayPal didn't answer clearly) |
+| GET | `/api/reconcile` | Match the ledger's gifts and payouts against PayPal Transaction Search |
+| POST | `/api/webhooks/paypal` | PayPal webhooks (captures, payout items); only verified ones are stored or acted on |
 | GET | `/api/gifts/{id}/impact` | A donor's receipt: which lines their gift paid for, and the payout that proves it |
 | GET | `/api/config` | Public settings for the browser (PayPal client id, demo mode) |
 | POST | `/api/demo/reset` | Demo mode only: clear the ledger so the demo can run again |
+| GET | `/api/health` | Liveness check |
 
 ## License
 

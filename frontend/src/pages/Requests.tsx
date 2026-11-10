@@ -39,12 +39,18 @@ export function Requests() {
             Field partners send receipts here. The AI has already read each one and checked every line against the donors&rsquo; limits;
             you decide what gets paid.
           </p>
+          <Link
+            to="/reconcile"
+            className="mt-3 mr-2 inline-block rounded-full bg-white/70 px-4 py-1.5 text-sm font-semibold text-wine no-underline hover:bg-white"
+          >
+            Check the ledger against PayPal&rsquo;s report
+          </Link>
           {q.data && waiting === 0 && config.data?.demo_mode && (
             <button
               type="button"
               onClick={() => reset.mutate()}
               disabled={reset.isPending}
-              className="mt-4 rounded-[14px] bg-wine px-[18px] py-3 font-bold text-white disabled:opacity-60"
+              className="mt-4 block rounded-[14px] bg-wine px-[18px] py-3 font-bold text-white disabled:opacity-60"
             >
               {reset.isPending ? 'Resetting...' : 'Run the demo again'}
             </button>

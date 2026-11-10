@@ -10,6 +10,8 @@ import { approveRequest, getConfig, getRequest, refreshRequest, resetDemo, sendB
 import { usd } from '../model'
 
 const APPROVER = 'Lin'
+// PayPal statuses that mean the money didn't reach the partner, or came back; the backend has freed the gifts.
+const PAYOUT_FAILED = ['FAILED', 'RETURNED', 'BLOCKED', 'REFUNDED', 'REVERSED', 'DENIED', 'CANCELED']
 
 export function ReviewDesk({ requestId }: { requestId: string }) {
   const qc = useQueryClient()
@@ -21,9 +23,14 @@ export function ReviewDesk({ requestId }: { requestId: string }) {
   useQuery({
     queryKey: [...key, 'payout'],
     queryFn: async () => {
-      const fresh = await refreshRequest(requestId)
-      qc.setQueryData(key, fresh)
-      return fresh.status
+      try {
+        const fresh = await refreshRequest(requestId)
+        qc.setQueryData(key, fresh)
+        return fresh.status
+      } catch (e) {
+        qc.invalidateQueries({ queryKey: key }) // e.g. PayPal refused it and the approval was undone
+        throw e
+      }
     },
     enabled: data?.status === 'paying',
     refetchInterval: 2000,
@@ -66,9 +73,13 @@ export function ReviewDesk({ requestId }: { requestId: string }) {
   const stage: Stage =
     data.status === 'paid' ? 'paid' : data.status === 'returned' ? 'returned' : data.status === 'paying' || approve.isPending ? 'paying' : 'review'
   const decisionError = approve.error ?? sendBack.error
+  const payout = data.payout
+  const payoutFailed = data.status === 'reviewed' && payout !== null && PAYOUT_FAILED.includes(payout.status)
   const notice = decisionError
     ? decisionError.message
-    : data.payable_cents === 0 && stage === 'review'
+    : payoutFailed
+      ? `PayPal didn't complete the last payout (${payout.status.toLowerCase()}${payout.failure ? `: ${payout.failure}` : ''}). Nothing reached ${request.partner}, and the gifts are back in the fund.`
+      : data.payable_cents === 0 && stage === 'review'
       ? 'Nothing on this receipt fits the fund. Send it back to the partner.'
       : data.shortfall_cents > 0
       ? `The fund is ${usd(data.shortfall_cents / 100)} short. Wait for more gifts before paying.`
@@ -106,7 +117,11 @@ export function ReviewDesk({ requestId }: { requestId: string }) {
               : stage === 'returned'
                 ? `Request ${request.id} went back to ${request.partner} with the reasons below. No money moved.`
                 : stage === 'paying'
-                  ? `Sending ${usd(data.payable_cents / 100)} through PayPal Payouts. This usually takes a few seconds.`
+                  ? payout?.status === 'NO_ANSWER'
+                    ? `PayPal didn't answer clearly, so Kindtrail is asking again with the same batch ID. PayPal never makes a second batch with one, so ${request.partner} can't be paid twice.`
+                    : payout?.status === 'UNCLAIMED'
+                      ? `PayPal sent ${usd(data.payable_cents / 100)} and is holding it until ${request.partner} claims it.`
+                      : `Sending ${usd(data.payable_cents / 100)} through PayPal Payouts. This usually takes a few seconds.`
                   : `Request ${request.id} from the ${request.fund}. The AI has checked the receipt; it's your call now.`}
           </p>
           {(stage === 'paid' || stage === 'returned') && config.data?.demo_mode && (
