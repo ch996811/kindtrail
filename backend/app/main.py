@@ -326,6 +326,9 @@ def create_app(settings: Settings | None = None, paypal: Any = None, conn: sqlit
             verified = pp(request).verify_webhook(webhook_id=settings.paypal_webhook_id,
                                                   headers=dict(request.headers), event=event)
         except PayPalError as e:
+            if not e.ambiguous:  # PayPal rejected the check itself, e.g. the signature headers are missing
+                log.warning("paypal webhook %s: PayPal refused to verify it; not stored: %s", what, e)
+                return JSONResponse({"result": "unverified"}, status_code=400)
             log.warning("paypal webhook %s: verification call failed, PayPal will retry: %s", what, e)
             return JSONResponse({"result": "verification-unavailable"}, status_code=503)
         if not verified:

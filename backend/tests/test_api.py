@@ -134,6 +134,17 @@ def test_webhook_verification_outage_asks_paypal_to_retry(client, fake_paypal, c
     assert conn.execute("SELECT COUNT(*) FROM webhook_events").fetchone()[0] == 0
 
 
+def test_a_delivery_paypal_refuses_to_verify_is_rejected(client, fake_paypal, conn):
+    def refuse(**_):  # what the sandbox answered on 2026-11-10 when the signature headers were missing
+        raise PayPalError(400, {"name": "INVALID_REQUEST", "message": "Request is not well-formed, syntactically "
+                                "incorrect, or violates schema."})
+
+    fake_paypal.verify_webhook = refuse
+    r = client.post("/api/webhooks/paypal", json={"id": "WH-10", "event_type": "PAYMENT.CAPTURE.COMPLETED", "resource": {}})
+    assert r.status_code == 400 and r.json()["result"] == "unverified"
+    assert conn.execute("SELECT COUNT(*) FROM webhook_events").fetchone()[0] == 0
+
+
 # Payouts that don't go simply ----------------------------------------------------------------
 
 def test_no_answer_from_paypal_keeps_the_approval_and_asking_again_never_pays_twice(client, fake_paypal, conn):
