@@ -86,8 +86,10 @@ class RateLimit:
     """An in-memory limit per visitor and, optionally, for everyone together. The hosted demo is public and shared,
     so one script shouldn't be able to drain the sandbox balance or the free AI quota. Resets on restart."""
 
-    def __init__(self, what: str, seconds: int, per_visitor: int | None = None, everyone: int | None = None):
+    def __init__(self, what: str, seconds: int, per_visitor: int | None = None, everyone: int | None = None,
+                 full: str | None = None):
         self.what, self.seconds, self.per_visitor, self.everyone = what, seconds, per_visitor, everyone
+        self.full = full  # what to say when everyone's limit is reached, if the generic message doesn't fit
         self.hits: dict[str, deque[float]] = defaultdict(deque)
         self.lock = threading.Lock()
 
@@ -109,7 +111,7 @@ class RateLimit:
                     q.popleft()
                 if len(q) >= limit:
                     if key == "*":
-                        raise TooMany(f"The shared demo has reached its limit of {limit} {self.what} for now, to keep "
+                        raise TooMany(self.full or f"The shared demo has reached its limit of {limit} {self.what} for now, to keep "
                                       "the sandbox working for everyone. Please try again later.")
                     raise TooMany(f"That's a lot of {self.what} in a short time. Please wait a few minutes.")
 
@@ -142,7 +144,10 @@ def create_app(settings: Settings | None = None, paypal: Any = None, conn: sqlit
 
     app = FastAPI(title="Kindtrail", lifespan=lifespan)
     decisions = RateLimit("approvals and send-backs", 600, per_visitor=8)
-    payouts = RateLimit("sandbox payouts today", 86400, everyone=12)
+    # About 47 payouts' worth of sandbox balance has to last until judging ends on Dec 15.
+    payouts = RateLimit("sandbox payouts today", 86400, everyone=3, full=(
+        "The shared demo has sent its 3 sandbox payouts for today, so the sandbox balance lasts through judging. "
+        "Everything up to Approve still works, and the demo video shows a payout from start to finish."))
     resets = RateLimit("demo resets", 600, per_visitor=6)
     uploads = RateLimit("receipt uploads", 3600, per_visitor=12)
     readings = RateLimit("readings of donor words", 3600, per_visitor=30)

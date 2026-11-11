@@ -441,6 +441,25 @@ def test_demo_mode_seeds_gifts_and_reset_lets_the_demo_run_again(conn, fake_payp
         assert c.post("/api/requests/KT-0142/approve").status_code == 200
 
 
+def test_the_shared_demo_sends_at_most_three_payouts_a_day(conn, fake_paypal, llm, tmp_path):
+    from fastapi.testclient import TestClient
+
+    from app.config import Settings
+    from app.main import create_app
+
+    settings = Settings(paypal_env="sandbox", paypal_client_id="x", paypal_client_secret="y", paypal_webhook_id="",
+                        partner_email=PARTNER_EMAIL, llm_provider="replay", gemini_api_key="", llm_daily_cap=5,
+                        demo_mode=True, db_path=":memory:", frontend_dist=str(tmp_path / "none"))
+    with TestClient(create_app(settings, paypal=fake_paypal, conn=conn, llm=llm)) as c:
+        for _ in range(3):
+            assert c.post("/api/requests/KT-0142/approve").status_code == 200
+            c.post("/api/demo/reset")
+        r = c.post("/api/requests/KT-0142/approve")
+        assert r.status_code == 429 and "3 sandbox payouts for today" in r.json()["message"]
+        assert len(fake_paypal.payouts) == 3
+        assert c.get("/api/requests/KT-0142").json()["status"] == "reviewed"
+
+
 def test_reconcile_keeps_payouts_a_demo_reset_cleared(conn, fake_paypal, llm, tmp_path):
     from fastapi.testclient import TestClient
 
